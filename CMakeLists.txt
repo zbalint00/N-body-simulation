@@ -34,7 +34,7 @@ else()
 endif()
 
 # Define the project name, version, and language.
-project(gpu_course_opencl VERSION 1.0 LANGUAGES CXX)
+project(n_body_simulation VERSION 1.0 LANGUAGES CXX)
 
 #==============================================================================
 # COMPILE OPTIONS
