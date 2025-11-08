@@ -8,67 +8,72 @@
  * @param deltaTime       (in)     The time step for the simulation frame.
  */
 __kernel void update(
-  __global float2* velocities,
-  __global float2* positions,
-  __global const float* masses,
-  const float deltaTime)
+	__global float4* posVel,
+	__global const float* masses,
+	const float deltaTime)
 {
-  // A physically-motivated gravitational constant.
-  const float G = 0.0001f;
+	// A physically-motivated gravitational constant.
+	const float G = 0.0001f;
 
-  // A small factor to prevent forces from becoming infinite during close encounters, improving stability.
-  const float softeningFactor = 0.001f;
+	// A small factor to prevent forces from becoming infinite during close encounters, improving stability.
+	const float softeningFactor = 0.001f;
 
-  const int particleIndex = get_global_id(0);
-  const int numParticles = get_global_size(0);
+	const int particleIndex = get_global_id(0);
+	const int numParticles = get_global_size(0);
 
-  // Read current particle's state from global memory.
-  float2 currentPosition = positions[particleIndex];
-  float  currentMass = masses[particleIndex];
+	float4 pv = posVel[particleIndex];
+	float2 currentPosition = (float2)(pv.x, pv.y);
+	float2 currentVelocity = (float2)(pv.z, pv.w);
 
-  // 1. Calculate Total Acceleration 
-  // This step computes the net gravitational force on the current particle
-  // by summing the forces from all other particles (F = G * m1 * m2 / (d^2 + e^2)).
-  float2 totalAcceleration = (float2)(0.0f, 0.0f);
-  for (int i = 0; i < numParticles; ++i)
-  {
-    // A particle does not exert force on itself.
-    if (i == particleIndex) continue;
+	// Read current particle's state from global memory.
+	float  currentMass = masses[particleIndex];
 
-    // Vector pointing from the current particle to the other particle.
-    float2 vectorToOther = positions[i] - currentPosition;
+	// 1. Calculate Total Acceleration
+	// This step computes the net gravitational force on the current particle
+	// by summing the forces from all other particles (F = G * m1 * m2 / (d^2 + e^2)).
+	float2 totalAcceleration = (float2)(0.0f, 0.0f);
+	for (int i = 0; i < numParticles; ++i)
+	{
+		// A particle does not exert force on itself.
+		if (i == particleIndex) continue;
 
-    // Calculate squared distance. Add the softening factor to the denominator
-    // to prevent division by zero and stabilize the simulation when particles get very close.
-    // This is known as "gravitational softening".
-    float distanceSquared = dot(vectorToOther, vectorToOther) + softeningFactor;
+		float4 other = posVel[i];
+		float2 otherPos = (float2)(other.x, other.y);
 
-    // Calculate the force magnitude using Newton's law of universal gravitation.
-    // The inverse cube of the distance is used here as a performance optimization.
-    float invDistCube = 1.0f / (distanceSquared * sqrt(distanceSquared));
-    float forceMagnitude = (G * masses[i]) * invDistCube;
+		// Vector pointing from the current particle to the other particle.
 
-    // Accumulate acceleration (a = F/m, but currentMass cancels out, so a = G*m_other/d^2).
-    totalAcceleration += vectorToOther * forceMagnitude;
-  }
+		float2 vectorToOther = otherPos - currentPosition;
 
-  // 2. Update State using Velocity Verlet Integration 
-  // This is a more stable numerical integration method than the basic Euler method.
-  // It conserves energy better over long periods, leading to more realistic orbits.
-  // p_new = p_old + v_old * dt + 0.5 * a_old * dt^2
-  // v_new = v_old + 0.5 * (a_old + a_new) * dt
-  // For this single-pass kernel, we simplify to a Leapfrog variant:
+		// Calculate squared distance. Add the softening factor to the denominator
+		// to prevent division by zero and stabilize the simulation when particles get very close.
+		// This is known as "gravitational softening".
 
-  // Read old velocity.
-  float2 oldVelocity = velocities[particleIndex];
+		float distanceSquared = dot(vectorToOther, vectorToOther) + softeningFactor;
 
-  // "Leapfrog" Kick: Update velocity using the calculated acceleration.
-  float2 newVelocity = oldVelocity + totalAcceleration * deltaTime;
+		// Calculate the force magnitude using Newton's law of universal gravitation.
+		// The inverse cube of the distance is used here as a performance optimization.
+		float invDistCube = 1.0f / (distanceSquared * sqrt(distanceSquared));
+		float forceMagnitude = (G * masses[i]) * invDistCube;
 
-  // "Leapfrog" Drift: Update position using the *newly calculated* velocity.
-  currentPosition += newVelocity * deltaTime;
+		// Accumulate acceleration (a = F/m, but currentMass cancels out, so a = G*m_other/d^2).
+		totalAcceleration += vectorToOther * forceMagnitude;
+	}
 
-  // Write the updated state back to global memory.
-  velocities[particleIndex] = newVelocity;
-  positions[particleIndex] = currentPosition;
+	// 2. Update State using Velocity Verlet Integration
+	// This is a more stable numerical integration method than the basic Euler method.
+	// It conserves energy better over long periods, leading to more realistic orbits.
+	// p_new = p_old + v_old * dt + 0.5 * a_old * dt^2
+	// v_new = v_old + 0.5 * (a_old + a_new) * dt
+	// For this single-pass kernel, we simplify to a Leapfrog variant:
+
+	// Read old velocity.
+
+	// "Leapfrog" Kick: Update velocity using the calculated acceleration.
+	float2 newVelocity = currentVelocity + totalAcceleration * deltaTime;
+
+	// "Leapfrog" Drift: Update position using the *newly calculated* velocity.
+	currentPosition += newVelocity * deltaTime;
+
+	// Write the updated state back to global memory.
+	posVel[particleIndex] = (float4)(currentPosition.x, currentPosition.y, newVelocity.x, newVelocity.y);
 }
