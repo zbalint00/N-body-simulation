@@ -10,6 +10,12 @@
 __kernel void update(
 	__global float4* posVel,
 	__global const float* masses,
+	__global const int*   particleCellIndex,
+    __global const float2* cellCOM,
+    __global const float*  cellMass,
+	const int totalCells,
+    const int gridNx,
+    const int gridNy,
 	const float deltaTime)
 {
 	// A physically-motivated gravitational constant.
@@ -18,46 +24,93 @@ __kernel void update(
 	// A small factor to prevent forces from becoming infinite during close encounters, improving stability.
 	const float softeningFactor = 0.001f;
 
-	const int particleIndex = get_global_id(0);
+	// const int particleIndex = get_global_id(0);
 	const int numParticles = get_global_size(0);
 
-    float4 pv = posVel[particleIndex];
-	float2 currentPosition = (float2)(pv.x, pv.y);
-	float2 currentVelocity = (float2)(pv.z, pv.w);
+ 	const int pid = get_global_id(0);
+
+	float4 pv = posVel[pid];
+	float2 pos = (float2)(pv.x, pv.y);
+    float2 vel = (float2)(pv.z, pv.w);
+		
+	// Read current particle's state from global memory.
+    float currentMass = masses[pid];
+
+    int myCell = particleCellIndex[pid];
+    int myIx = myCell % gridNx;
+    int myIy = myCell / gridNx;
 
 	// Read current particle's state from global memory.
-	float  currentMass = masses[particleIndex];
+	// float  currentMass = masses[particleIndex];
 
 	// 1. Calculate Total Acceleration
 	// This step computes the net gravitational force on the current particle
 	// by summing the forces from all other particles (F = G * m1 * m2 / (d^2 + e^2)).
+	
 	float2 totalAcceleration = (float2)(0.0f, 0.0f);
-	for (int i = 0; i < numParticles; ++i)
-	{
-		// A particle does not exert force on itself.
-		if (i == particleIndex) continue;
 
-		float4 other = posVel[i];
-		float2 otherPos = (float2)(other.x, other.y);
+	 for (int c = 0; c < totalCells; ++c) {
+        int cx = c % gridNx;
+        int cy = c / gridNx;
 
-		// Vector pointing from the current particle to the other particle.
+        int dx = cx - myIx;
+        int dy = cy - myIy;
+        int adx = dx < 0 ? -dx : dx;
+        int ady = dy < 0 ? -dy : dy;
 
-		float2 vectorToOther = otherPos - currentPosition;
+        if (adx <= 1 && ady <= 1) {
+            // neighbor or same cell -> go through particles and pick those in cell c
+            for (int i = 0; i < numParticles; ++i) {
+                if (i == pid) continue;
+				if (particleCellIndex[i] != c) continue;
+                float4 otherPV = posVel[i];
+                float2 op = (float2)(otherPV.x, otherPV.y);
+                float2 vectorToOther = op - pos;
+				float distanceSquared = dot(vectorToOther, vectorToOther) + softeningFactor;
+                float invDistCube = 1.0f / (distanceSquared * sqrt(distanceSquared));
+	 	        float forceMagnitude = (G * masses[i]) * invDistCube;
+                totalAcceleration += vectorToOther * forceMagnitude;
+            }	
+        } else {
+            // distant cell -> approximate with COM
+            float cm = cellMass[c];
+            if (cm <= 0.0f) continue; // empty cell
+            float2 cpos = cellCOM[c];
+            float2 dvec = cpos - pos;
+            float r2 = dvec.x*dvec.x + dvec.y*dvec.y + softeningFactor;
+            float invr = 1.0f / sqrt(r2);
+            float invr3 = invr * invr * invr;
+            // use cell mass
+            totalAcceleration += dvec * (G * cm * invr3);
+        }
+    }
+	
+	// for (int i = 0; i < numParticles; ++i)
+	// {
+	//  A particle does not exert force on itself.
+	// 	if (i == particleIndex) continue;
 
-		// Calculate squared distance. Add the softening factor to the denominator
-		// to prevent division by zero and stabilize the simulation when particles get very close.
-		// This is known as "gravitational softening".
+	// 	float4 other = posVel[i];
+	// 	float2 otherPos = (float2)(other.x, other.y);
 
-		float distanceSquared = dot(vectorToOther, vectorToOther) + softeningFactor;
+	//  Vector pointing from the current particle to the other particle.
 
-		// Calculate the force magnitude using Newton's law of universal gravitation.
-		// The inverse cube of the distance is used here as a performance optimization.
-		float invDistCube = 1.0f / (distanceSquared * sqrt(distanceSquared));
-		float forceMagnitude = (G * masses[i]) * invDistCube;
+	// 	float2 vectorToOther = otherPos - currentPosition;
+ 
+	// 	 Calculate squared distance. Add the softening factor to the denominator
+	// 	 to prevent division by zero and stabilize the simulation when particles get very close.
+	// 	 This is known as "gravitational softening".
 
-		// Accumulate acceleration (a = F/m, but currentMass cancels out, so a = G*m_other/d^2).
-		totalAcceleration += vectorToOther * forceMagnitude;
-	}
+	// 	float distanceSquared = dot(vectorToOther, vectorToOther) + softeningFactor;
+ 
+	// 	 Calculate the force magnitude using Newton's law of universal gravitation.
+	// 	 The inverse cube of the distance is used here as a performance optimization.
+	// 	float invDistCube = 1.0f / (distanceSquared * sqrt(distanceSquared));
+	// 	float forceMagnitude = (G * masses[i]) * invDistCube;
+ 
+	// 	 Accumulate acceleration (a = F/m, but currentMass cancels out, so a = G*m_other/d^2).
+	// 	totalAcceleration += vectorToOther * forceMagnitude;
+	// }
 
 	// 2. Update State using Velocity Verlet Integration
 	// This is a more stable numerical integration method than the basic Euler method.
@@ -69,13 +122,19 @@ __kernel void update(
 	// Read old velocity.
 
 	// "Leapfrog" Kick: Update velocity using the calculated acceleration.
-	float2 newVelocity = currentVelocity + totalAcceleration * deltaTime;
+	// float2 newVelocity = currentVelocity + totalAcceleration * deltaTime;
 
 	// "Leapfrog" Drift: Update position using the *newly calculated* velocity.
-	currentPosition += newVelocity * deltaTime;
+	// currentPosition += newVelocity * deltaTime;
+
+	float2 newVel = vel + totalAcceleration * deltaTime;
+    float2 newPos = pos + newVel * deltaTime;
 
 	// Write the updated state back to global memory.
-	posVel[particleIndex] = (float4)(currentPosition.x, currentPosition.y, newVelocity.x, newVelocity.y);
+	// posVel[pid] = (float4)(currentPosition.x, currentPosition.y, newVelocity.x, newVelocity.y);
+	
+	posVel[pid] = (float4)(newPos.x, newPos.y, newVel.x, newVel.y);
+
 }
 
 /**

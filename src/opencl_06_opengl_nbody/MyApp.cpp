@@ -173,6 +173,12 @@ void MyApp::InitCL() {
 	// Set kernel arguments
 	kernelUpdate.setArg(0, clVboBuffer);
 	kernelUpdate.setArg(1, clMasses);
+	kernelUpdate.setArg(2, clParticleCellIndex);
+	kernelUpdate.setArg(3, clCellCOM);
+	kernelUpdate.setArg(4, clCellMass);
+	kernelUpdate.setArg(5, totalCells);
+	kernelUpdate.setArg(6, gridNx);
+	kernelUpdate.setArg(7, gridNy);
 
 	// set Cell kernel parameters
 	kernelCellIndex.setArg(0, clVboBuffer);
@@ -197,6 +203,7 @@ void MyApp::InitCL() {
 void MyApp::Update(const UpdateInfo& info) {
 	if (!simulation_paused) {
 		float deltaTime = std::clamp(info.deltaTimeSec, 0.0000001f, 0.001f);
+		kernelUpdate.setArg(8, deltaTime);
 
 		std::vector<cl::Memory> glObjects{ clVboBuffer };
 		queue.enqueueAcquireGLObjects(&glObjects);
