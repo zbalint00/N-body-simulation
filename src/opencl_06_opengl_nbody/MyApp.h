@@ -89,13 +89,22 @@ private:
 	cl::CommandQueue  queue;
 	cl::Program       program;
 	cl::Kernel        kernelUpdate;
-    cl::Kernel        kernelCellIndex;
+
+    // New kernels for grid and COM
+	cl::Kernel        kernelCellIndex;
+    cl::Kernel        kernelCOM;
+
 	cl::BufferGL      clVboBuffer;
 	cl::Buffer        clVelocities;
 	cl::Buffer        clMasses;
 
 	// Grid buffer
 	cl::Buffer clParticleCellIndex;  // Particles cell indexes
+
+	// COM buffers
+	cl::Buffer clCellMass;
+	cl::Buffer clCellCOM;
+
 
 	// Simulation parameters
 	static constexpr int   numParticles = 20000;

@@ -115,14 +115,18 @@ void MyApp::InitCL() {
 		throw;
 	}
 	kernelUpdate = cl::Kernel(program, "update");
-	// Init kernel
+	// Init kernels
 	kernelCellIndex = cl::Kernel(program, "computeParticleCellIndex");
+	kernelCOM = cl::Kernel(program, "computeCellCOM");
 
 	// Shared GL/CL buffer
 	clVboBuffer = cl::BufferGL(context, CL_MEM_WRITE_ONLY, *vbo);
 	clMasses = cl::Buffer(context, CL_MEM_READ_WRITE, numParticles * sizeof(float));
 
+	// Init Grid + COM buffers
 	clParticleCellIndex = cl::Buffer(context, CL_MEM_READ_WRITE, numParticles * sizeof(int));
+	clCellCOM = cl::Buffer(context, CL_MEM_READ_WRITE, gridNx * gridNy * sizeof(glm::vec2));
+	clCellMass = cl::Buffer(context, CL_MEM_READ_WRITE, gridNx * gridNy * sizeof(float));
 
 	// Initialize particle data
 	std::vector<float> masses(numParticles, 1.f);
@@ -170,7 +174,7 @@ void MyApp::InitCL() {
 	kernelUpdate.setArg(0, clVboBuffer);
 	kernelUpdate.setArg(1, clMasses);
 
-	// set Cell parameters
+	// set Cell kernel parameters
 	kernelCellIndex.setArg(0, clVboBuffer);
 	kernelCellIndex.setArg(1, clParticleCellIndex);
 	kernelCellIndex.setArg(2, gridNx);
@@ -179,6 +183,15 @@ void MyApp::InitCL() {
 	kernelCellIndex.setArg(5, cellSizeInvY);
 	kernelCellIndex.setArg(6, worldMinX);
 	kernelCellIndex.setArg(7, worldMinY);
+
+	// set COM kernel parameters
+	kernelCOM.setArg(0, clVboBuffer);
+	kernelCOM.setArg(1, clMasses);
+	kernelCOM.setArg(2, clParticleCellIndex);
+	kernelCOM.setArg(3, clCellMass);
+	kernelCOM.setArg(4, clCellCOM);
+	kernelCOM.setArg(5, numParticles);
+	kernelCOM.setArg(6, totalCells);
 }
 
 void MyApp::Update(const UpdateInfo& info) {
@@ -187,7 +200,10 @@ void MyApp::Update(const UpdateInfo& info) {
 
 		std::vector<cl::Memory> glObjects{ clVboBuffer };
 		queue.enqueueAcquireGLObjects(&glObjects);
+		// Call Cell kernel
 		queue.enqueueNDRangeKernel(kernelCellIndex, cl::NullRange, cl::NDRange(numParticles));
+		// Call COM kernel
+		queue.enqueueNDRangeKernel(kernelCOM, cl::NullRange, cl::NDRange(totalCells));
 		queue.enqueueNDRangeKernel(kernelUpdate, cl::NullRange, cl::NDRange(numParticles));
 		queue.enqueueReleaseGLObjects(&glObjects);
 		queue.finish();

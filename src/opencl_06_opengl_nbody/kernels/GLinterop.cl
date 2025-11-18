@@ -112,3 +112,45 @@ __kernel void computeParticleCellIndex(
 
     particleCellIndex[id] = ix + iy * gridNx;
 }
+
+/**
+ * This kernel calculates COM for each cell.
+ *
+ * @param positions             (in/out) Global buffer of particle positions (vec2). This is shared with an OpenGL VBO.
+ * @param masses                (in)     Global buffer of particle masses (float).
+ * @param particalCellIndex     (in/out) Global buffer of particle cell indexes
+ * @param cellMass              (in/out)     .
+ * @param cellCOM               (in/out)     .
+ * @param numParticles          (in)     .
+ * @param numCell               (in)     .
+ */
+
+__kernel void computeCellCOM(
+  __global const float2* positions,
+  __global const float* masses,
+  __global const int* particleCellIndex,
+  __global float* cellMass,
+  __global float2* cellCOM,
+  const int numParticles,
+  const int numCells)
+{
+   int cid = get_global_id(0);
+
+    float2 com = (float2)(0.0f, 0.0f);
+    float mSum = 0.0f;
+
+    for (int i = 0; i < numParticles; i++) {
+        if (particleCellIndex[i] == cid) {
+            float m = masses[i];
+            com += positions[i] * m;
+            mSum += m;
+        }
+    }
+
+    if (mSum > 0.0f) {
+        com /= mSum;
+    }
+
+    cellCOM[cid] = com;
+    cellMass[cid] = mSum;
+}
