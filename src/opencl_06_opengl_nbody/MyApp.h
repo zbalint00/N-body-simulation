@@ -60,6 +60,24 @@ private:
 	int windowWidth = 0;
 	int windowHeight = 0;
 
+	// Grids (2D)
+	int gridNx = 64;
+	int gridNy = 64;
+	int totalCells = gridNx * gridNy;
+
+	// World size
+	float worldMinX = -1.0f;
+	float worldMaxX = 1.0f;
+	float worldMinY = -1.0f;
+	float worldMaxY = 1.0f;
+
+	// Grid sizes
+	float cellSizeX = (worldMaxX - worldMinX) / gridNx;
+	float cellSizeY = (worldMaxY - worldMinY) / gridNy;
+	float cellSizeInvX = 1.0f / cellSizeX;
+	float cellSizeInvY = 1.0f / cellSizeY;
+	float cellSize = fmax(cellSizeX, cellSizeY);
+
 	// OpenGL
 	UniqueGlVertexArray vao;
 	UniqueGlBuffer      vbo;
@@ -71,9 +89,13 @@ private:
 	cl::CommandQueue  queue;
 	cl::Program       program;
 	cl::Kernel        kernelUpdate;
+    cl::Kernel        kernelCellIndex;
 	cl::BufferGL      clVboBuffer;
 	cl::Buffer        clVelocities;
 	cl::Buffer        clMasses;
+
+	// Grid buffer
+	cl::Buffer clParticleCellIndex;  // Particles cell indexes
 
 	// Simulation parameters
 	static constexpr int   numParticles = 20000;

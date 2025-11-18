@@ -115,10 +115,14 @@ void MyApp::InitCL() {
 		throw;
 	}
 	kernelUpdate = cl::Kernel(program, "update");
+	// Init kernel
+	kernelCellIndex = cl::Kernel(program, "computeParticleCellIndex");
 
 	// Shared GL/CL buffer
 	clVboBuffer = cl::BufferGL(context, CL_MEM_WRITE_ONLY, *vbo);
 	clMasses = cl::Buffer(context, CL_MEM_READ_WRITE, numParticles * sizeof(float));
+
+	clParticleCellIndex = cl::Buffer(context, CL_MEM_READ_WRITE, numParticles * sizeof(int));
 
 	// Initialize particle data
 	std::vector<float> masses(numParticles, 1.f);
@@ -165,15 +169,25 @@ void MyApp::InitCL() {
 	// Set kernel arguments
 	kernelUpdate.setArg(0, clVboBuffer);
 	kernelUpdate.setArg(1, clMasses);
+
+	// set Cell parameters
+	kernelCellIndex.setArg(0, clVboBuffer);
+	kernelCellIndex.setArg(1, clParticleCellIndex);
+	kernelCellIndex.setArg(2, gridNx);
+	kernelCellIndex.setArg(3, gridNy);
+	kernelCellIndex.setArg(4, cellSizeInvX);
+	kernelCellIndex.setArg(5, cellSizeInvY);
+	kernelCellIndex.setArg(6, worldMinX);
+	kernelCellIndex.setArg(7, worldMinY);
 }
 
 void MyApp::Update(const UpdateInfo& info) {
 	if (!simulation_paused) {
 		float deltaTime = std::clamp(info.deltaTimeSec, 0.0000001f, 0.001f);
-		kernelUpdate.setArg(2, deltaTime);
 
 		std::vector<cl::Memory> glObjects{ clVboBuffer };
 		queue.enqueueAcquireGLObjects(&glObjects);
+		queue.enqueueNDRangeKernel(kernelCellIndex, cl::NullRange, cl::NDRange(numParticles));
 		queue.enqueueNDRangeKernel(kernelUpdate, cl::NullRange, cl::NDRange(numParticles));
 		queue.enqueueReleaseGLObjects(&glObjects);
 		queue.finish();

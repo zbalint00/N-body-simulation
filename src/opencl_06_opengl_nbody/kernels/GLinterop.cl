@@ -21,7 +21,7 @@ __kernel void update(
 	const int particleIndex = get_global_id(0);
 	const int numParticles = get_global_size(0);
 
-	float4 pv = posVel[particleIndex];
+    float4 pv = posVel[particleIndex];
 	float2 currentPosition = (float2)(pv.x, pv.y);
 	float2 currentVelocity = (float2)(pv.z, pv.w);
 
@@ -76,4 +76,39 @@ __kernel void update(
 
 	// Write the updated state back to global memory.
 	posVel[particleIndex] = (float4)(currentPosition.x, currentPosition.y, newVelocity.x, newVelocity.y);
+}
+
+/**
+ * This kernel calculates cell index for each partical.
+ *
+ * @param positions             (in/out) Global buffer of particle positions (vec2). This is shared with an OpenGL VBO.
+ * @param particalCellIndex     (in/out) Global buffer of particle cell indexes
+ * @param gridNx                (in)     Grid X size.
+ * @param gridNy                (in)     Grid Y size.
+ * @param cellSizeInvX          (in)     Cell Inv X size.
+ * @param cellSizeInvY          (in)     Cell Inv Y size.
+ * @param worldMinX             (in)     World minimum X coordinate.
+ * @param worldMinY             (in)     World minimum Y coordinate.
+ */
+
+__kernel void computeParticleCellIndex(
+    __global const float2* positions,
+    __global int* particleCellIndex,
+    const int gridNx,
+    const int gridNy,
+	const float cellSizeInvX,
+    const float cellSizeInvY,
+	const float worldMinX,
+    const float worldMinY)
+{
+    int id = get_global_id(0);
+    float2 pos = positions[id];
+
+    int ix = (int)((pos.x - worldMinX) * cellSizeInvX);
+    int iy = (int)((pos.y - worldMinY) * cellSizeInvY);
+
+    ix = clamp(ix, 0, gridNx - 1);
+    iy = clamp(iy, 0, gridNy - 1);
+
+    particleCellIndex[id] = ix + iy * gridNx;
 }
