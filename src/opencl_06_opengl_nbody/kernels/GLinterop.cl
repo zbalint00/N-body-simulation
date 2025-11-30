@@ -1,145 +1,7 @@
 /**
- * This kernel calculates the gravitational forces between a system of particles
- * to simulate their motion over time.
- *
- * @param velocities      (in/out) Global buffer of particle velocities (vec2).
- * @param positions       (in/out) Global buffer of particle positions (vec2). This is shared with an OpenGL VBO.
- * @param masses          (in)     Global buffer of particle masses (float).
- * @param deltaTime       (in)     The time step for the simulation frame.
- */
-__kernel void update(
-	__global float4* posVel,
-	__global const float* masses,
-	__global const int*   particleCellIndex,
-    __global const float2* cellCOM,
-    __global const float*  cellMass,
-	const int totalCells,
-    const int gridNx,
-    const int gridNy,
-	const float deltaTime)
-{
-	// A physically-motivated gravitational constant.
-	const float G = 0.0001f;
-
-	// A small factor to prevent forces from becoming infinite during close encounters, improving stability.
-	const float softeningFactor = 0.001f;
-
-	// const int particleIndex = get_global_id(0);
-	const int numParticles = get_global_size(0);
-
- 	const int pid = get_global_id(0);
-
-	float4 pv = posVel[pid];
-	float2 pos = (float2)(pv.x, pv.y);
-    float2 vel = (float2)(pv.z, pv.w);
-		
-	// Read current particle's state from global memory.
-    float currentMass = masses[pid];
-
-    int myCell = particleCellIndex[pid];
-    int myIx = myCell % gridNx;
-    int myIy = myCell / gridNx;
-
-	// Read current particle's state from global memory.
-	// float  currentMass = masses[particleIndex];
-
-	// 1. Calculate Total Acceleration
-	// This step computes the net gravitational force on the current particle
-	// by summing the forces from all other particles (F = G * m1 * m2 / (d^2 + e^2)).
-	
-	float2 totalAcceleration = (float2)(0.0f, 0.0f);
-
-	 for (int c = 0; c < totalCells; ++c) {
-        int cx = c % gridNx;
-        int cy = c / gridNx;
-
-        int dx = cx - myIx;
-        int dy = cy - myIy;
-        int adx = dx < 0 ? -dx : dx;
-        int ady = dy < 0 ? -dy : dy;
-
-        if (adx <= 1 && ady <= 1) {
-            // neighbor or same cell -> go through particles and pick those in cell c
-            for (int i = 0; i < numParticles; ++i) {
-                if (i == pid) continue;
-				if (particleCellIndex[i] != c) continue;
-                float4 otherPV = posVel[i];
-                float2 op = (float2)(otherPV.x, otherPV.y);
-                float2 vectorToOther = op - pos;
-				float distanceSquared = dot(vectorToOther, vectorToOther) + softeningFactor;
-                float invDistCube = 1.0f / (distanceSquared * sqrt(distanceSquared));
-	 	        float forceMagnitude = (G * masses[i]) * invDistCube;
-                totalAcceleration += vectorToOther * forceMagnitude;
-            }	
-        } else {
-            // distant cell -> approximate with COM
-            float cm = cellMass[c];
-            if (cm <= 0.0f) continue; // empty cell
-            float2 cpos = cellCOM[c];
-            float2 dvec = cpos - pos;
-            float r2 = dvec.x*dvec.x + dvec.y*dvec.y + softeningFactor;
-            float invr = 1.0f / sqrt(r2);
-            float invr3 = invr * invr * invr;
-            // use cell mass
-            totalAcceleration += dvec * (G * cm * invr3);
-        }
-    }
-	
-	// for (int i = 0; i < numParticles; ++i)
-	// {
-	//  A particle does not exert force on itself.
-	// 	if (i == particleIndex) continue;
-
-	// 	float4 other = posVel[i];
-	// 	float2 otherPos = (float2)(other.x, other.y);
-
-	//  Vector pointing from the current particle to the other particle.
-
-	// 	float2 vectorToOther = otherPos - currentPosition;
- 
-	// 	 Calculate squared distance. Add the softening factor to the denominator
-	// 	 to prevent division by zero and stabilize the simulation when particles get very close.
-	// 	 This is known as "gravitational softening".
-
-	// 	float distanceSquared = dot(vectorToOther, vectorToOther) + softeningFactor;
- 
-	// 	 Calculate the force magnitude using Newton's law of universal gravitation.
-	// 	 The inverse cube of the distance is used here as a performance optimization.
-	// 	float invDistCube = 1.0f / (distanceSquared * sqrt(distanceSquared));
-	// 	float forceMagnitude = (G * masses[i]) * invDistCube;
- 
-	// 	 Accumulate acceleration (a = F/m, but currentMass cancels out, so a = G*m_other/d^2).
-	// 	totalAcceleration += vectorToOther * forceMagnitude;
-	// }
-
-	// 2. Update State using Velocity Verlet Integration
-	// This is a more stable numerical integration method than the basic Euler method.
-	// It conserves energy better over long periods, leading to more realistic orbits.
-	// p_new = p_old + v_old * dt + 0.5 * a_old * dt^2
-	// v_new = v_old + 0.5 * (a_old + a_new) * dt
-	// For this single-pass kernel, we simplify to a Leapfrog variant:
-
-	// Read old velocity.
-
-	// "Leapfrog" Kick: Update velocity using the calculated acceleration.
-	// float2 newVelocity = currentVelocity + totalAcceleration * deltaTime;
-
-	// "Leapfrog" Drift: Update position using the *newly calculated* velocity.
-	// currentPosition += newVelocity * deltaTime;
-
-	float2 newVel = vel + totalAcceleration * deltaTime;
-    float2 newPos = pos + newVel * deltaTime;
-
-	// Write the updated state back to global memory.
-	// posVel[pid] = (float4)(currentPosition.x, currentPosition.y, newVelocity.x, newVelocity.y);
-	
-	posVel[pid] = (float4)(newPos.x, newPos.y, newVel.x, newVel.y);
-
-}
-
-/**
  * This kernel calculates cell index for each partical.
  *
+ * TODO Documentation
  * @param positions             (in/out) Global buffer of particle positions (vec2). This is shared with an OpenGL VBO.
  * @param particalCellIndex     (in/out) Global buffer of particle cell indexes
  * @param gridNx                (in)     Grid X size.
@@ -151,65 +13,141 @@ __kernel void update(
  */
 
 __kernel void computeParticleCellIndex(
-    __global const float2* positions,
+    __global const float4* posVel, 
     __global int* particleCellIndex,
     const int gridNx,
     const int gridNy,
 	const float cellSizeInvX,
     const float cellSizeInvY,
 	const float worldMinX,
-    const float worldMinY)
+    const float worldMinY,
+    const int numParticles)
 {
-    int id = get_global_id(0);
-    float2 pos = positions[id];
+    int pid = get_global_id(0);
+    if (pid >= numParticles) return;
+    float2 pos = (float2)(posVel[pid].x, posVel[pid].y);
 
-    int ix = (int)((pos.x - worldMinX) * cellSizeInvX);
-    int iy = (int)((pos.y - worldMinY) * cellSizeInvY);
+    int cellX = (int)((pos.x - worldMinX) * cellSizeInvX);
+    int cellY = (int)((pos.y - worldMinY) * cellSizeInvY);
 
-    ix = clamp(ix, 0, gridNx - 1);
-    iy = clamp(iy, 0, gridNy - 1);
+    cellX = clamp(cellX, 0, gridNx - 1);
+    cellY = clamp(cellY, 0, gridNy - 1);
 
-    particleCellIndex[id] = ix + iy * gridNx;
+    particleCellIndex[pid] = cellX + cellY * gridNx;
 }
 
 /**
  * This kernel calculates COM for each cell.
  *
- * @param positions             (in/out) Global buffer of particle positions (vec2). This is shared with an OpenGL VBO.
- * @param masses                (in)     Global buffer of particle masses (float).
- * @param particalCellIndex     (in/out) Global buffer of particle cell indexes
- * @param cellMass              (in/out)     .
- * @param cellCOM               (in/out)     .
- * @param numParticles          (in)     .
- * @param numCell               (in)     .
+ * TODO documentation
+ * @param 
  */
-
 __kernel void computeCellCOM(
-  __global const float2* positions,
-  __global const float* masses,
-  __global const int* particleCellIndex,
-  __global float* cellMass,
-  __global float2* cellCOM,
-  const int numParticles,
-  const int numCells)
+    __global const float4* posVel,
+    __global const float* masses,
+    __global const int* particleCellIndex,
+    __global float* cellMass,
+    __global float2* cellCOM,
+    const int numParticles,
+    const int totalCells,
+    __local float* s_m,        
+    __local float* s_mpx,      
+    __local float* s_mpy      
+)
 {
-   int cid = get_global_id(0);
+    int cell  = get_group_id(0);
+    if (cell >= totalCells) return;
 
-    float2 com = (float2)(0.0f, 0.0f);
-    float mSum = 0.0f;
+    int lid   = get_local_id(0);
+    int lsize = get_local_size(0);
 
-    for (int i = 0; i < numParticles; i++) {
-        if (particleCellIndex[i] == cid) {
-            float m = masses[i];
-            com += positions[i] * m;
-            mSum += m;
+    float my_m   = 0.0f;
+    float my_mpx = 0.0f;
+    float my_mpy = 0.0f;
+
+    for (int pid = lid; pid < numParticles; pid += lsize) {
+        if (particleCellIndex[pid] == cell) {
+            float m = masses[pid];
+            float2 p = (float2)(posVel[pid].x, posVel[pid].y);
+            my_m   += m;
+            my_mpx += p.x * m;
+            my_mpy += p.y * m;
         }
     }
 
-    if (mSum > 0.0f) {
-        com /= mSum;
+    s_m[lid]   = my_m;
+    s_mpx[lid] = my_mpx;
+    s_mpy[lid] = my_mpy;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int offset = lsize >> 1; offset > 0; offset >>= 1) {
+        if (lid < offset) {
+            s_m[lid]   += s_m[lid + offset];
+            s_mpx[lid] += s_mpx[lid + offset];
+            s_mpy[lid] += s_mpy[lid + offset];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    cellCOM[cid] = com;
-    cellMass[cid] = mSum;
+    if (lid == 0) {
+        float mass = s_m[0];
+        cellMass[cell]   = mass;
+        cellCOM[cell] = (float2)(s_mpx[0], s_mpy[0]);
+    }
+}
+
+/**
+ * TODO Documentation
+ * This kernel calculates the gravitational forces between a system of particles
+ * to simulate their motion over time.
+ *
+ *
+ * @param velocities      (in/out) Global buffer of particle velocities (vec2).
+ * @param positions       (in/out) Global buffer of particle positions (vec2). This is shared with an OpenGL VBO.
+ * @param masses          (in)     Global buffer of particle masses (float).
+ * @param deltaTime       (in)     The time step for the simulation frame.
+ */
+__kernel void update(
+    __global float4* posVel,
+    __global const float* masses,
+    __global const int* particleCellIndex,
+    __global const float* cellMass,       
+    __global const float2* cellCOM,
+    const int gridNx,
+    const int gridNy,
+    const int totalCells,
+    const int numParticles,
+    const float deltaTime)
+{
+    const float G = 0.0001f;
+    const float softening = 0.001f;
+
+    int pid = get_global_id(0);
+    if (pid >= numParticles) return;
+
+    float4 pv = posVel[pid];
+    float2 p = (float2)(pv.x, pv.y);
+    float2 v = (float2)(pv.z, pv.w);
+
+    int myCell = particleCellIndex[pid];
+    int myCx = myCell % gridNx;
+    int myCy = myCell / gridNx;
+
+    float2 acc = (float2)(0.0f, 0.0f);
+
+    for (int c = 0; c < totalCells; ++c) {
+        float cm = cellMass[c];
+        if (cm <= 0.0f) continue;
+        float2 cpos = (float2)(cellCOM[c].x / cm, cellCOM[c].y / cm);
+
+        float2 d = cpos - p;
+        float r2 = d.x * d.x + d.y * d.y + softening;
+        float invr = 1.0f / sqrt(r2);
+        float invr3 = invr * invr * invr;
+        acc += d * (G * cm * invr3);
+    }
+
+    float2 newV = v + acc * deltaTime;
+    float2 newP = p + newV * deltaTime;
+    posVel[pid] = (float4)(newP.x, newP.y, newV.x, newV.y);
 }

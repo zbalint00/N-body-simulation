@@ -114,10 +114,10 @@ void MyApp::InitCL() {
 			std::cerr << "Build log for " << dev.getInfo<CL_DEVICE_NAME>() << ":\n" << log << "\n";
 		throw;
 	}
-	kernelUpdate = cl::Kernel(program, "update");
 	// Init kernels
 	kernelCellIndex = cl::Kernel(program, "computeParticleCellIndex");
-	kernelCOM = cl::Kernel(program, "computeCellCOM");
+	kernelComputeCOM = cl::Kernel(program, "computeCellCOM");
+	kernelUpdate = cl::Kernel(program, "update");
 
 	// Shared GL/CL buffer
 	clVboBuffer = cl::BufferGL(context, CL_MEM_WRITE_ONLY, *vbo);
@@ -171,16 +171,7 @@ void MyApp::InitCL() {
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	// Set kernel arguments
-	kernelUpdate.setArg(0, clVboBuffer);
-	kernelUpdate.setArg(1, clMasses);
-	kernelUpdate.setArg(2, clParticleCellIndex);
-	kernelUpdate.setArg(3, clCellCOM);
-	kernelUpdate.setArg(4, clCellMass);
-	kernelUpdate.setArg(5, totalCells);
-	kernelUpdate.setArg(6, gridNx);
-	kernelUpdate.setArg(7, gridNy);
 
-	// set Cell kernel parameters
 	kernelCellIndex.setArg(0, clVboBuffer);
 	kernelCellIndex.setArg(1, clParticleCellIndex);
 	kernelCellIndex.setArg(2, gridNx);
@@ -189,29 +180,42 @@ void MyApp::InitCL() {
 	kernelCellIndex.setArg(5, cellSizeInvY);
 	kernelCellIndex.setArg(6, worldMinX);
 	kernelCellIndex.setArg(7, worldMinY);
+	kernelCellIndex.setArg(8, numParticles);
 
-	// set COM kernel parameters
-	kernelCOM.setArg(0, clVboBuffer);
-	kernelCOM.setArg(1, clMasses);
-	kernelCOM.setArg(2, clParticleCellIndex);
-	kernelCOM.setArg(3, clCellMass);
-	kernelCOM.setArg(4, clCellCOM);
-	kernelCOM.setArg(5, numParticles);
-	kernelCOM.setArg(6, totalCells);
+	kernelComputeCOM.setArg(0, clVboBuffer);
+	kernelComputeCOM.setArg(1, clMasses);
+	kernelComputeCOM.setArg(2, clParticleCellIndex);
+	kernelComputeCOM.setArg(3, clCellMass);
+	kernelComputeCOM.setArg(4, clCellCOM);
+	kernelComputeCOM.setArg(5, numParticles);
+	kernelComputeCOM.setArg(6, totalCells);
+	kernelComputeCOM.setArg(7, cl::Local(localSize * sizeof(float)));
+	kernelComputeCOM.setArg(8, cl::Local(localSize * sizeof(float)));
+	kernelComputeCOM.setArg(9, cl::Local(localSize * sizeof(float)));
+
+	kernelUpdate.setArg(0, clVboBuffer);
+	kernelUpdate.setArg(1, clMasses);
+	kernelUpdate.setArg(2, clParticleCellIndex);
+	kernelUpdate.setArg(3, clCellMass);
+	kernelUpdate.setArg(4, clCellCOM);
+	kernelUpdate.setArg(5, gridNx);
+	kernelUpdate.setArg(6, gridNy);
+	kernelUpdate.setArg(7, totalCells);
+	kernelUpdate.setArg(8, numParticles);
 }
 
 void MyApp::Update(const UpdateInfo& info) {
 	if (!simulation_paused) {
 		float deltaTime = std::clamp(info.deltaTimeSec, 0.0000001f, 0.001f);
-		kernelUpdate.setArg(8, deltaTime);
+		kernelUpdate.setArg(9, deltaTime);
 
 		std::vector<cl::Memory> glObjects{ clVboBuffer };
 		queue.enqueueAcquireGLObjects(&glObjects);
-		// Call Cell kernel
-		queue.enqueueNDRangeKernel(kernelCellIndex, cl::NullRange, cl::NDRange(numParticles));
-		// Call COM kernel
-		queue.enqueueNDRangeKernel(kernelCOM, cl::NullRange, cl::NDRange(totalCells));
-		queue.enqueueNDRangeKernel(kernelUpdate, cl::NullRange, cl::NDRange(numParticles));
+		queue.enqueueNDRangeKernel(kernelCellIndex, cl::NullRange, cl::NDRange(globalParticles), cl::NDRange(localSize));
+
+		queue.enqueueNDRangeKernel(kernelComputeCOM, cl::NullRange, cl::NDRange(globalCOM), cl::NDRange(localSize));
+
+		queue.enqueueNDRangeKernel(kernelUpdate, cl::NullRange, cl::NDRange(globalParticles), cl::NDRange(localSize));
 		queue.enqueueReleaseGLObjects(&glObjects);
 		queue.finish();
 	}

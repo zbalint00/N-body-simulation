@@ -90,28 +90,32 @@ private:
 	cl::Program       program;
 	cl::Kernel        kernelUpdate;
 
-    // New kernels for grid and COM
+	// New kernels for grid and COM
 	cl::Kernel        kernelCellIndex;
-    cl::Kernel        kernelCOM;
+	cl::Kernel		  kernelComputeCOM;
 
 	cl::BufferGL      clVboBuffer;
 	cl::Buffer        clVelocities;
 	cl::Buffer        clMasses;
 
 	// Grid buffer
-	cl::Buffer clParticleCellIndex;  // Particles cell indexes
+	cl::Buffer clParticleCellIndex;
 
 	// COM buffers
 	cl::Buffer clCellMass;
 	cl::Buffer clCellCOM;
 
-
 	// Simulation parameters
-	static constexpr int   numParticles = 20000;
+	static constexpr int   numParticles = 50000;
 	static constexpr float particleSize = 0.01f;
-	static constexpr bool  useRingInit = true;
+	static constexpr bool  useRingInit = false;
 	static constexpr bool  useRandomVelocities = true;
 	static constexpr float massiveObjectMass = 1.0f;
+
+	// GPU Optimization helpers
+	const size_t localSize = 128;
+	const size_t globalParticles = ((size_t)numParticles + localSize - 1) / localSize * localSize;
+	const size_t globalCOM = ((size_t)totalCells) * localSize;
 
 	// Application state
 	bool simulation_paused = false;
