@@ -128,48 +128,6 @@ void MyApp::InitCL() {
 	clCellCOM = cl::Buffer(context, CL_MEM_READ_WRITE, gridNx * gridNy * sizeof(glm::vec2));
 	clCellMass = cl::Buffer(context, CL_MEM_READ_WRITE, gridNx * gridNy * sizeof(float));
 
-	// Initialize particle data
-	std::vector<float> masses(numParticles, 1.f);
-	queue.enqueueWriteBuffer(clMasses, CL_TRUE, 0, masses.size() * sizeof(float), masses.data());
-
-	std::vector<glm::vec2> velocities(numParticles, glm::vec2{});
-	if (useRandomVelocities)
-		for (size_t i = 0; i < velocities.size(); i += 2) {
-			double angle = i / double(velocities.size() / 2) * (2 * M_PI);
-			velocities[i].x = static_cast<float>(-std::cos(angle) * 1.7);
-			velocities[i].y = static_cast<float>(std::sin(angle) * 1.7);
-		}
-
-	//// Initialize positions
-	std::vector<glm::vec2> positions(numParticles);
-	if (useRingInit) {
-		for (int i = 0; i < numParticles; ++i) {
-			float angle = (static_cast<float>(i) / numParticles) * 2.0f * M_PI;
-			float r = 0.25f;
-			positions[i] = glm::vec2(r * std::sin(angle), r * std::cos(angle));
-		}
-	}
-	else {
-		std::mt19937 rng(std::random_device{}());
-		std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-		std::generate(positions.begin(), positions.end(), [&] { return glm::vec2{ dist(rng), dist(rng) }; });
-	}
-
-	std::vector<glm::vec4> posVel(numParticles);
-	for (int i = 0; i < numParticles; ++i) {
-		glm::vec2 p = positions[i];
-		glm::vec2 v = velocities[i];
-
-		posVel[i] = glm::vec4(p.x, p.y, v.x, v.y);
-	}
-
-	glBindBuffer(GL_ARRAY_BUFFER, *vbo);
-	if (glm::vec4* ptr = static_cast<glm::vec4*>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY))) {
-		std::copy(posVel.begin(), posVel.end(), ptr);
-		glUnmapBuffer(GL_ARRAY_BUFFER);
-	}
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
 	// Set kernel arguments
 
 	kernelCellIndex.setArg(0, clVboBuffer);
@@ -202,12 +160,59 @@ void MyApp::InitCL() {
 	kernelUpdate.setArg(6, gridNy);
 	kernelUpdate.setArg(7, totalCells);
 	kernelUpdate.setArg(8, numParticles);
+
+	ResetSimulation();
+}
+
+void MyApp::ResetSimulation() {
+	// Initialize particle data
+	std::vector<float> masses(numParticles, 1.f);
+	queue.enqueueWriteBuffer(clMasses, CL_TRUE, 0, masses.size() * sizeof(float), masses.data());
+
+	std::vector<glm::vec2> velocities(numParticles, glm::vec2{});
+	if (useRandomVelocities)
+		for (size_t i = 0; i < velocities.size(); i += 2) {
+			double angle = i / double(velocities.size() / 2) * (2 * M_PI);
+			velocities[i].x = static_cast<float>(-std::cos(angle) * 1.7);
+			velocities[i].y = static_cast<float>(std::sin(angle) * 1.7);
+		}
+
+	// Initialize positions
+	std::vector<glm::vec2> positions(numParticles);
+	if (useRingInit) {
+		for (int i = 0; i < numParticles; ++i) {
+			float angle = (static_cast<float>(i) / numParticles) * 2.0f * M_PI;
+			float r = 0.25f;
+			positions[i] = glm::vec2(r * std::sin(angle), r * std::cos(angle));
+		}
+	}
+	else {
+		std::mt19937 rng(std::random_device{}());
+		std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+		std::generate(positions.begin(), positions.end(), [&] { return glm::vec2{ dist(rng), dist(rng) }; });
+	}
+
+	std::vector<glm::vec4> posVel(numParticles);
+	for (int i = 0; i < numParticles; ++i) {
+		glm::vec2 p = positions[i];
+		glm::vec2 v = velocities[i];
+
+		posVel[i] = glm::vec4(p.x, p.y, v.x, v.y);
+	}
+
+	glBindBuffer(GL_ARRAY_BUFFER, *vbo);
+	if (glm::vec4* ptr = static_cast<glm::vec4*>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY))) {
+		std::copy(posVel.begin(), posVel.end(), ptr);
+		glUnmapBuffer(GL_ARRAY_BUFFER);
+	}
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void MyApp::Update(const UpdateInfo& info) {
 	if (!simulation_paused) {
 		float deltaTime = std::clamp(info.deltaTimeSec, 0.0000001f, 0.001f);
-		kernelUpdate.setArg(9, deltaTime);
+		kernelUpdate.setArg(9, gravityConstant);
+		kernelUpdate.setArg(10, deltaTime);
 
 		std::vector<cl::Memory> glObjects{ clVboBuffer };
 		queue.enqueueAcquireGLObjects(&glObjects);
@@ -272,8 +277,20 @@ void MyApp::RenderGUI()
 
 	// === Controls ===
 	ImGui::Separator();
+	ImGui::Text("Parameters");
+	ImGui::SliderFloat(
+		"G (gravity)",
+		&gravityConstant,
+		1e-6f,
+		5e-3f,
+		"%.6f"
+	);
+	ImGui::Separator();
 	ImGui::Text("Simulation Controls");
 	ImGui::Checkbox("Pause Simulation", &simulation_paused);
+	if (ImGui::Button("Reset simulation")) {
+		ResetSimulation();
+	}
 
 	ImGui::End();
 }

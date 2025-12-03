@@ -55,6 +55,8 @@ public:
 	void Resize(int width, int height);
 	void OtherEvent(const SDL_Event&);
 
+	void ResetSimulation();
+
 private:
 	// Window
 	int windowWidth = 0;
@@ -106,11 +108,14 @@ private:
 	cl::Buffer clCellCOM;
 
 	// Simulation parameters
-	static constexpr int   numParticles = 50000;
+	static constexpr int   numParticles = 20000;
 	static constexpr float particleSize = 0.01f;
 	static constexpr bool  useRingInit = false;
 	static constexpr bool  useRandomVelocities = true;
 	static constexpr float massiveObjectMass = 1.0f;
+
+	// ImGui
+	float gravityConstant = 0.0001f;
 
 	// GPU Optimization helpers
 	const size_t localSize = 128;
