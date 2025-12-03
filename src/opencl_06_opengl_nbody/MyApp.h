@@ -29,59 +29,94 @@
 #include <string>
 
 struct UpdateInfo {
-  float elapsedTimeSec = 0.0f; // Total time since program start
-  float deltaTimeSec = 0.0f; // Time since last update
+	float elapsedTimeSec = 0.0f; // Total time since program start
+	float deltaTimeSec = 0.0f; // Time since last update
 };
 
 class MyApp {
 public:
-  MyApp();
-  ~MyApp();
+	MyApp();
+	~MyApp();
 
-  void InitGL();
-  void InitCL();
+	void InitGL();
+	void InitCL();
 
-  void Update(const UpdateInfo& info);
-  void Render();
-  void RenderGUI();
+	void Update(const UpdateInfo& info);
+	void Render();
+	void RenderGUI();
 
-  // SDL Event Handlers
-  void KeyboardDown(const SDL_KeyboardEvent&);
-  void KeyboardUp(const SDL_KeyboardEvent&);
-  void MouseMove(const SDL_MouseMotionEvent&);
-  void MouseDown(const SDL_MouseButtonEvent&);
-  void MouseUp(const SDL_MouseButtonEvent&);
-  void MouseWheel(const SDL_MouseWheelEvent&);
-  void Resize(int width, int height);
-  void OtherEvent(const SDL_Event&);
+	// SDL Event Handlers
+	void KeyboardDown(const SDL_KeyboardEvent&);
+	void KeyboardUp(const SDL_KeyboardEvent&);
+	void MouseMove(const SDL_MouseMotionEvent&);
+	void MouseDown(const SDL_MouseButtonEvent&);
+	void MouseUp(const SDL_MouseButtonEvent&);
+	void MouseWheel(const SDL_MouseWheelEvent&);
+	void Resize(int width, int height);
+	void OtherEvent(const SDL_Event&);
 
 private:
-  // Window
-  int windowWidth = 0;
-  int windowHeight = 0;
+	// Window
+	int windowWidth = 0;
+	int windowHeight = 0;
 
-  // OpenGL
-  UniqueGlVertexArray vao;
-  UniqueGlBuffer      vbo;
-  UniqueGlTexture     particleTexture;
-  gShaderProgram      shaderProgram;
+	// Grids (2D)
+	int gridNx = 64;
+	int gridNy = 64;
+	int totalCells = gridNx * gridNy;
 
-  // OpenCL 
-  cl::Context       context;
-  cl::CommandQueue  queue;
-  cl::Program       program;
-  cl::Kernel        kernelUpdate;
-  cl::BufferGL      clVboBuffer;
-  cl::Buffer        clVelocities;
-  cl::Buffer        clMasses;
+	// World size
+	float worldMinX = -1.0f;
+	float worldMaxX = 1.0f;
+	float worldMinY = -1.0f;
+	float worldMaxY = 1.0f;
 
-  // Simulation parameters
-  static constexpr int   numParticles = 15000;
-  static constexpr float particleSize = 0.01f;
-  static constexpr bool  useRingInit = true;
-  static constexpr bool  useRandomVelocities = true;
-  static constexpr float massiveObjectMass = 1.0f;
+	// Grid sizes
+	float cellSizeX = (worldMaxX - worldMinX) / gridNx;
+	float cellSizeY = (worldMaxY - worldMinY) / gridNy;
+	float cellSizeInvX = 1.0f / cellSizeX;
+	float cellSizeInvY = 1.0f / cellSizeY;
+	float cellSize = fmax(cellSizeX, cellSizeY);
 
-  // Application state
-  bool simulation_paused = false;
+	// OpenGL
+	UniqueGlVertexArray vao;
+	UniqueGlBuffer      vbo;
+	UniqueGlTexture     particleTexture;
+	gShaderProgram      shaderProgram;
+
+	// OpenCL
+	cl::Context       context;
+	cl::CommandQueue  queue;
+	cl::Program       program;
+	cl::Kernel        kernelUpdate;
+
+	// New kernels for grid and COM
+	cl::Kernel        kernelCellIndex;
+	cl::Kernel		  kernelComputeCOM;
+
+	cl::BufferGL      clVboBuffer;
+	cl::Buffer        clVelocities;
+	cl::Buffer        clMasses;
+
+	// Grid buffer
+	cl::Buffer clParticleCellIndex;
+
+	// COM buffers
+	cl::Buffer clCellMass;
+	cl::Buffer clCellCOM;
+
+	// Simulation parameters
+	static constexpr int   numParticles = 50000;
+	static constexpr float particleSize = 0.01f;
+	static constexpr bool  useRingInit = false;
+	static constexpr bool  useRandomVelocities = true;
+	static constexpr float massiveObjectMass = 1.0f;
+
+	// GPU Optimization helpers
+	const size_t localSize = 128;
+	const size_t globalParticles = ((size_t)numParticles + localSize - 1) / localSize * localSize;
+	const size_t globalCOM = ((size_t)totalCells) * localSize;
+
+	// Application state
+	bool simulation_paused = false;
 };
