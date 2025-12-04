@@ -180,17 +180,66 @@ void MyApp::ResetSimulation() {
 
 	// Initialize positions
 	std::vector<glm::vec2> positions(currentNumParticles);
-	if (useRingInit) {
+	std::mt19937 rng(std::random_device{}());
+	switch (initDistribution) {
+	default:
+	case 0: {
+		std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+		std::generate(positions.begin(), positions.end(), [&] { return glm::vec2{ dist(rng), dist(rng) }; });
+		break;
+	}
+	case 1: {
 		for (int i = 0; i < currentNumParticles; ++i) {
 			float angle = (static_cast<float>(i) / currentNumParticles) * 2.0f * M_PI;
 			float r = 0.25f;
 			positions[i] = glm::vec2(r * std::sin(angle), r * std::cos(angle));
 		}
+		break;
 	}
-	else {
-		std::mt19937 rng(std::random_device{}());
-		std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-		std::generate(positions.begin(), positions.end(), [&] { return glm::vec2{ dist(rng), dist(rng) }; });
+	case 2: {
+		glm::vec2 A(-0.6f, -0.5f);
+		glm::vec2 B(0.6f, -0.5f);
+		glm::vec2 C(0.0f, 0.6f);
+
+		std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
+
+		for (int i = 0; i < currentNumParticles; ++i) {
+			float u = dist01(rng);
+			float v = dist01(rng);
+			if (u + v > 1.0f) {
+				u = 1.0f - u;
+				v = 1.0f - v;
+			}
+			glm::vec2 P = A + u * (B - A) + v * (C - A);
+			positions[i] = P;
+		}
+		break;
+	}
+	case 3: {
+		std::normal_distribution<float> gauss(0.0f, 0.25f);
+		for (int i = 0; i < currentNumParticles; ++i) {
+			float x = gauss(rng);
+			float y = gauss(rng);
+			positions[i] = glm::vec2(x, y);
+		}
+		break;
+		break;
+	}
+	case 4: {
+		std::normal_distribution<float> noise(0.0f, 0.02f);
+		const float arms = static_cast<float>(spiralArms);
+		for (int i = 0; i < currentNumParticles; ++i) {
+			float t = static_cast<float>(i) / currentNumParticles;
+			float angle = t * arms * 6.0f * static_cast<float>(M_PI);
+			float radius = 0.05f + 0.45f * t;
+
+			float x = std::cos(angle) * radius + noise(rng);
+			float y = std::sin(angle) * radius + noise(rng);
+
+			positions[i] = glm::vec2(x, y);
+		}
+		break;
+	}
 	}
 
 	std::vector<glm::vec4> posVel(currentNumParticles);
@@ -296,6 +345,21 @@ void MyApp::RenderGUI()
 		2,
 		maxParticles
 	);
+	ImGui::Separator();
+	ImGui::Text("Initial distribution");
+	ImGui::RadioButton("Uniform random", &initDistribution, 0);
+	ImGui::SameLine();
+	ImGui::RadioButton("Ring", &initDistribution, 1);
+	ImGui::SameLine();
+	ImGui::RadioButton("Triangle", &initDistribution, 2);
+	ImGui::SameLine();
+	ImGui::RadioButton("Gaussian blob", &initDistribution, 3);
+	ImGui::SameLine();
+	ImGui::RadioButton("Spiral galaxy", &initDistribution, 4);
+	if (initDistribution == 4) {
+		ImGui::SliderInt("Spiral arms", &spiralArms, 1, 2);
+	}
+
 	ImGui::Separator();
 	ImGui::Text("Simulation Controls");
 	ImGui::Checkbox("Pause Simulation", &simulation_paused);

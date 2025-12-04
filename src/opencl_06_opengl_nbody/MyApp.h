@@ -109,7 +109,6 @@ private:
 
 	// Simulation parameters
 	static constexpr float particleSize = 0.01f;
-	static constexpr bool  useRingInit = false;
 	static constexpr bool  useRandomVelocities = true;
 	static constexpr float massiveObjectMass = 1.0f;
 
@@ -118,6 +117,17 @@ private:
 	int numParticles = 20000;
 	int currentNumParticles = 20000;
 	float gravityConstant = 0.0001f;
+
+	// Initial distribution type (0..4)
+	// 0 = Uniform random
+	// 1 = Ring
+	// 2 = Triangle
+	// 3 = Gaussian blob
+	// 4 = Spiral galaxy
+	int initDistribution = 0;
+
+	// extra parameter for Spiral galaxy initial distribution (1..4)
+	int spiralArms = 2;
 
 	// GPU Optimization helpers
 	const size_t localSize = 128;
