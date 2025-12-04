@@ -18,8 +18,7 @@ void main(void)
 {
 	vec4 P = gl_in[0].gl_Position;
 
-	if(max(abs(P.x), abs(P.y)) < 1) // if the particlis is inside the screen
-	{
+
 		// a: left-bottom 
 		vec2 va = P.xy + vec2(-0.5, -0.5) * particle_size;
 		gl_Position = vec4(va, P.zw);
@@ -49,5 +48,5 @@ void main(void)
 		EmitVertex();
 
 		EndPrimitive();
-	}
+	
 }

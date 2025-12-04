@@ -62,27 +62,37 @@ private:
 	int windowWidth = 0;
 	int windowHeight = 0;
 
-	// Grids (2D)
-	int gridNx = 64;
-	int gridNy = 64;
-	int totalCells = gridNx * gridNy;
+	// Camera
+	glm::mat4 view = glm::mat4(1.0f);
+	glm::mat4 proj = glm::mat4(1.0f);
+
+	// Grids (3D)
+	int gridNx = 32;
+	int gridNy = 32;
+	int gridNz = 32;
+	int totalCells = gridNx * gridNy * gridNz;
 
 	// World size
 	float worldMinX = -1.0f;
 	float worldMaxX = 1.0f;
 	float worldMinY = -1.0f;
 	float worldMaxY = 1.0f;
+	float worldMinZ = -1.0f;
+	float worldMaxZ = 1.0f;
 
 	// Grid sizes
 	float cellSizeX = (worldMaxX - worldMinX) / gridNx;
 	float cellSizeY = (worldMaxY - worldMinY) / gridNy;
+	float cellSizeZ = (worldMaxZ - worldMinZ) / gridNz;
 	float cellSizeInvX = 1.0f / cellSizeX;
 	float cellSizeInvY = 1.0f / cellSizeY;
-	float cellSize = fmax(cellSizeX, cellSizeY);
+	float cellSizeInvZ = 1.0f / cellSizeZ;
+	float cellSize = fmax(fmax(cellSizeX, cellSizeY), cellSizeZ);
 
 	// OpenGL
 	UniqueGlVertexArray vao;
 	UniqueGlBuffer      vbo;
+	UniqueGlBuffer      vboVel; // Buffer for velocities
 	UniqueGlTexture     particleTexture;
 	gShaderProgram      shaderProgram;
 
@@ -97,7 +107,7 @@ private:
 	cl::Kernel		  kernelComputeCOM;
 
 	cl::BufferGL      clVboBuffer;
-	cl::Buffer        clVelocities;
+	cl::BufferGL      clVelocities;
 	cl::Buffer        clMasses;
 
 	// Grid buffer
