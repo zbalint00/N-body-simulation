@@ -160,7 +160,7 @@ __kernel void computeCellCOM(
  *   - integrate the total acceleration to update velocity and position.
  *
  * @param posVel            (in/out)     Global buffer of particle state: x,y = position; z,w = velocity.
- * @param masses            (in)     Global buffer of particle masses (float).
+ * @param masses            (in)         Global buffer of particle masses (float).
  * @param particleCellIndex (in/out)     Global buffer of particle's cell index.
  * @param cellMass          (in/out)     For each cell, total mass in that cell.
  * @param cellCOM           (in/out)     For each cell, sum of (mass * position) in that cell.
@@ -168,6 +168,7 @@ __kernel void computeCellCOM(
  * @param gridNy            (in)         Number of cells in Y direction.
  * @param totalCells        (in)         Total number of cells (gridNx * gridNy).
  * @param numParticles      (in)         Number of particles.
+ * @param G                 (in)         A physically-motivated gravitational constant. (float)
  * @param deltaTime         (in)         Time step for integration.
  */
 __kernel void update(
@@ -180,11 +181,10 @@ __kernel void update(
     const int gridNy,
     const int totalCells,
     const int numParticles,
+    const float G,
     const float deltaTime)
 {
-    // A physically-motivated gravitational constant.
-    const float G = 0.0001f;
-      
+          
     // A small factor to prevent forces from becoming infinite during close encounters, improving stability.
     const float softening = 0.001f;
 
