@@ -108,18 +108,20 @@ private:
 	cl::Buffer clCellCOM;
 
 	// Simulation parameters
-	static constexpr int   numParticles = 20000;
 	static constexpr float particleSize = 0.01f;
 	static constexpr bool  useRingInit = false;
 	static constexpr bool  useRandomVelocities = true;
 	static constexpr float massiveObjectMass = 1.0f;
 
 	// ImGui
+	static constexpr int maxParticles = 50000;  // buffer capacity
+	int numParticles = 20000;
+	int currentNumParticles = 20000;
 	float gravityConstant = 0.0001f;
 
 	// GPU Optimization helpers
 	const size_t localSize = 128;
-	const size_t globalParticles = ((size_t)numParticles + localSize - 1) / localSize * localSize;
+	const size_t globalParticles = ((size_t)maxParticles + localSize - 1) / localSize * localSize;
 	const size_t globalCOM = ((size_t)totalCells) * localSize;
 
 	// Application state

@@ -62,7 +62,7 @@ void MyApp::InitGL() {
 	// Create vertex buffer for particles
 	vbo = createBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, *vbo);
-	glBufferData(GL_ARRAY_BUFFER, numParticles * sizeof(glm::vec4), nullptr, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, maxParticles * sizeof(glm::vec4), nullptr, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	// Create vertex array object to handle vertex properties during rendering
@@ -121,10 +121,10 @@ void MyApp::InitCL() {
 
 	// Shared GL/CL buffer
 	clVboBuffer = cl::BufferGL(context, CL_MEM_WRITE_ONLY, *vbo);
-	clMasses = cl::Buffer(context, CL_MEM_READ_WRITE, numParticles * sizeof(float));
+	clMasses = cl::Buffer(context, CL_MEM_READ_WRITE, maxParticles * sizeof(float));
 
 	// Init Grid + COM buffers
-	clParticleCellIndex = cl::Buffer(context, CL_MEM_READ_WRITE, numParticles * sizeof(int));
+	clParticleCellIndex = cl::Buffer(context, CL_MEM_READ_WRITE, maxParticles * sizeof(int));
 	clCellCOM = cl::Buffer(context, CL_MEM_READ_WRITE, gridNx * gridNy * sizeof(glm::vec2));
 	clCellMass = cl::Buffer(context, CL_MEM_READ_WRITE, gridNx * gridNy * sizeof(float));
 
@@ -138,14 +138,14 @@ void MyApp::InitCL() {
 	kernelCellIndex.setArg(5, cellSizeInvY);
 	kernelCellIndex.setArg(6, worldMinX);
 	kernelCellIndex.setArg(7, worldMinY);
-	kernelCellIndex.setArg(8, numParticles);
+	kernelCellIndex.setArg(8, currentNumParticles);
 
 	kernelComputeCOM.setArg(0, clVboBuffer);
 	kernelComputeCOM.setArg(1, clMasses);
 	kernelComputeCOM.setArg(2, clParticleCellIndex);
 	kernelComputeCOM.setArg(3, clCellMass);
 	kernelComputeCOM.setArg(4, clCellCOM);
-	kernelComputeCOM.setArg(5, numParticles);
+	kernelComputeCOM.setArg(5, currentNumParticles);
 	kernelComputeCOM.setArg(6, totalCells);
 	kernelComputeCOM.setArg(7, cl::Local(localSize * sizeof(float)));
 	kernelComputeCOM.setArg(8, cl::Local(localSize * sizeof(float)));
@@ -159,17 +159,18 @@ void MyApp::InitCL() {
 	kernelUpdate.setArg(5, gridNx);
 	kernelUpdate.setArg(6, gridNy);
 	kernelUpdate.setArg(7, totalCells);
-	kernelUpdate.setArg(8, numParticles);
+	kernelUpdate.setArg(8, currentNumParticles);
 
 	ResetSimulation();
 }
 
 void MyApp::ResetSimulation() {
+	currentNumParticles = numParticles;
 	// Initialize particle data
-	std::vector<float> masses(numParticles, 1.f);
+	std::vector<float> masses(currentNumParticles, 1.f);
 	queue.enqueueWriteBuffer(clMasses, CL_TRUE, 0, masses.size() * sizeof(float), masses.data());
 
-	std::vector<glm::vec2> velocities(numParticles, glm::vec2{});
+	std::vector<glm::vec2> velocities(currentNumParticles, glm::vec2{});
 	if (useRandomVelocities)
 		for (size_t i = 0; i < velocities.size(); i += 2) {
 			double angle = i / double(velocities.size() / 2) * (2 * M_PI);
@@ -178,10 +179,10 @@ void MyApp::ResetSimulation() {
 		}
 
 	// Initialize positions
-	std::vector<glm::vec2> positions(numParticles);
+	std::vector<glm::vec2> positions(currentNumParticles);
 	if (useRingInit) {
-		for (int i = 0; i < numParticles; ++i) {
-			float angle = (static_cast<float>(i) / numParticles) * 2.0f * M_PI;
+		for (int i = 0; i < currentNumParticles; ++i) {
+			float angle = (static_cast<float>(i) / currentNumParticles) * 2.0f * M_PI;
 			float r = 0.25f;
 			positions[i] = glm::vec2(r * std::sin(angle), r * std::cos(angle));
 		}
@@ -192,8 +193,8 @@ void MyApp::ResetSimulation() {
 		std::generate(positions.begin(), positions.end(), [&] { return glm::vec2{ dist(rng), dist(rng) }; });
 	}
 
-	std::vector<glm::vec4> posVel(numParticles);
-	for (int i = 0; i < numParticles; ++i) {
+	std::vector<glm::vec4> posVel(currentNumParticles);
+	for (int i = 0; i < currentNumParticles; ++i) {
 		glm::vec2 p = positions[i];
 		glm::vec2 v = velocities[i];
 
@@ -206,6 +207,10 @@ void MyApp::ResetSimulation() {
 		glUnmapBuffer(GL_ARRAY_BUFFER);
 	}
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	kernelCellIndex.setArg(8, currentNumParticles);
+	kernelComputeCOM.setArg(5, currentNumParticles);
+	kernelUpdate.setArg(8, currentNumParticles);
 }
 
 void MyApp::Update(const UpdateInfo& info) {
@@ -239,7 +244,7 @@ void MyApp::Render() {
 	shaderProgram.SetTexture("tex0", 0, *particleTexture);
 
 	glBindVertexArray(*vao);
-	glDrawArrays(GL_POINTS, 0, numParticles);
+	glDrawArrays(GL_POINTS, 0, currentNumParticles);
 	glBindVertexArray(0);
 
 	shaderProgram.Off();
@@ -284,6 +289,12 @@ void MyApp::RenderGUI()
 		1e-6f,
 		5e-3f,
 		"%.6f"
+	);
+	ImGui::SliderInt(
+		"Number of particles",
+		&numParticles,
+		2,
+		maxParticles
 	);
 	ImGui::Separator();
 	ImGui::Text("Simulation Controls");
