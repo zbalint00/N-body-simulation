@@ -1,4 +1,4 @@
-# N-body simulation hand in project
+# N-body simulation hand-in project
 OpenCL material for GPU course
 
 ## Generating build scripts and building
