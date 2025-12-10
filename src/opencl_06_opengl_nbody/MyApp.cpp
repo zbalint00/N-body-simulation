@@ -113,16 +113,13 @@ void MyApp::InitGL() {
 	glTextureParameterf(*particleTexture, GL_TEXTURE_MAX_ANISOTROPY, maxAnisotropy);
 
 	// Init Camera
-	float aspect = (windowHeight > 0)
-		? static_cast<float>(windowWidth) / static_cast<float>(windowHeight)
-		: 1.0f;
+	m_camera.SetView(
+		glm::vec3(0.0, 0.0, 2.0),  // Camera position
+		glm::vec3(0.0, 0.0, 0.0),  // Where it is looking
+		glm::vec3(0.0, 1.0, 0.0)); // World up
 
-	proj = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 10.0f);
-	view = glm::lookAt(
-		glm::vec3(0.0f, 0.0f, 1.0f),   // kamera pozíció
-		glm::vec3(0.0f, 0.0f, 0.0f),   // hova néz
-		glm::vec3(0.0f, 1.0f, 0.0f)    // felfelé
-	);
+	m_cameraManipulator.SetCamera(&m_camera);
+	
 }
 
 void MyApp::InitCL() {
@@ -305,6 +302,8 @@ void MyApp::ResetSimulation() {
 }
 
 void MyApp::Update(const UpdateInfo& info) {
+	m_cameraManipulator.Update(info.deltaTimeSec);
+
 	if (!simulation_paused) {
 		float deltaTime = std::clamp(info.deltaTimeSec, 0.0000001f, 0.001f);
 		kernelUpdate.setArg(11, gravityConstant);
@@ -334,8 +333,9 @@ void MyApp::Render() {
 	shaderProgram.SetUniform("particle_size", particleSize);
 	shaderProgram.SetTexture("tex0", 0, *particleTexture);
 
-	glm::mat4 viewProj = proj * view;
-	shaderProgram.SetUniform("u_viewProj", viewProj);
+	// Uniform param
+	// View and Projection matrix for camera
+	glUniformMatrix4fv(ul("viewProj"), 1, GL_FALSE, glm::value_ptr(m_camera.GetViewProj()));
 
 	glBindVertexArray(*vao);
 	glDrawArrays(GL_POINTS, 0, currentNumParticles);
@@ -415,12 +415,20 @@ void MyApp::RenderGUI()
 	ImGui::End();
 }
 
-void MyApp::KeyboardDown(const SDL_KeyboardEvent&) {}
-void MyApp::KeyboardUp(const SDL_KeyboardEvent&) {}
-void MyApp::MouseMove(const SDL_MouseMotionEvent&) {}
+void MyApp::KeyboardDown(const SDL_KeyboardEvent& key) {
+	m_cameraManipulator.KeyboardDown(key);
+}
+void MyApp::KeyboardUp(const SDL_KeyboardEvent& key) {
+	m_cameraManipulator.KeyboardUp(key);
+}
+void MyApp::MouseMove(const SDL_MouseMotionEvent& mouse) {
+	m_cameraManipulator.MouseMove(mouse);
+}
 void MyApp::MouseDown(const SDL_MouseButtonEvent&) {}
 void MyApp::MouseUp(const SDL_MouseButtonEvent&) {}
-void MyApp::MouseWheel(const SDL_MouseWheelEvent&) {}
+void MyApp::MouseWheel(const SDL_MouseWheelEvent& wheel) {
+	m_cameraManipulator.MouseWheel(wheel);
+}
 void MyApp::OtherEvent(const SDL_Event&) {}
 
 void MyApp::Resize(int width, int height) {
@@ -428,9 +436,6 @@ void MyApp::Resize(int width, int height) {
 	windowWidth = width;
 	windowHeight = height;
 
-	float aspect = (height > 0)
-		? static_cast<float>(width) / static_cast<float>(height)
-		: 1.0f;
+	m_camera.SetAspect(static_cast<float>(width) / height);
 
-	proj = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 10.0f);
 }

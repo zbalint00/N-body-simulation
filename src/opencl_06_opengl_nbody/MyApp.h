@@ -16,6 +16,8 @@
 // Utils
 #include "gShaderProgram.h"
 #include <GLUtils.hpp>
+#include "Camera.h"
+#include "CameraManipulator.h"
 
 // OpenCL
 #include <CL/opencl.hpp>
@@ -63,8 +65,8 @@ private:
 	int windowHeight = 0;
 
 	// Camera
-	glm::mat4 view = glm::mat4(1.0f);
-	glm::mat4 proj = glm::mat4(1.0f);
+	Camera m_camera;
+	CameraManipulator m_cameraManipulator;
 
 	// Grids (3D)
 	int gridNx = 32;
@@ -123,7 +125,7 @@ private:
 	static constexpr float massiveObjectMass = 1.0f;
 
 	// ImGui
-	static constexpr int maxParticles = 50000;  // buffer capacity
+	static constexpr int maxParticles = 50000;  // Buffer capacity
 	int numParticles = 20000;
 	int currentNumParticles = 20000;
 	float gravityConstant = 0.0001f;
@@ -136,7 +138,7 @@ private:
 	// 4 = Spiral galaxy
 	int initDistribution = 0;
 
-	// extra parameter for Spiral galaxy initial distribution (1..4)
+	// Extra parameter for Spiral galaxy initial distribution (1..4)
 	int spiralArms = 2;
 
 	// GPU Optimization helpers

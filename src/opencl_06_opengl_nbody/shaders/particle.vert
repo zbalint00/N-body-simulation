@@ -2,7 +2,9 @@
 
 in vec3 vs_in_pos;
 in vec3 vs_in_vel;
-uniform mat4 u_viewProj;
+// Transformation matrix
+// View * Projection matrix 
+uniform mat4 viewProj;
 
 out Vertex
 {
@@ -13,7 +15,7 @@ void main()
 {
 	vec3 pos = vs_in_pos.xyz;
     vec3 vel = vs_in_vel.xyz;
-	gl_Position = u_viewProj * vec4(pos, 1.0);
+	gl_Position = viewProj * vec4(pos, 1.0);
     
 	// compute speed magnitude
     float speed = length(vel);
