@@ -73,22 +73,22 @@ void CameraManipulator::KeyboardDown(const SDL_KeyboardEvent& key)
 		if ( !key.repeat ) m_speed /= 4.0f;
 		break;
 	case SDLK_W:
-		m_goForward = 1;
+		m_goForward = 0.1;
 		break;
 	case SDLK_S:
-		m_goForward = -1;
+		m_goForward = -0.1;
 		break;
 	case SDLK_A:
-		m_goRight = -1;
+		m_goRight = -0.1;
 		break;
 	case SDLK_D:
-		m_goRight = 1;
+		m_goRight = 0.1;
 		break;
 	case SDLK_E:
-		m_goUp = 1;
+		m_goUp = 0.1;
 		break;
 	case SDLK_Q:
-		m_goUp = -1;
+		m_goUp = -0.1;
 		break;
 	}
 }

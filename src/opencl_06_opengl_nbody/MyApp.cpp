@@ -66,13 +66,13 @@ void MyApp::InitGL() {
 	// Create vertex buffer for particles
 	vbo = createBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, *vbo);
-	glBufferData(GL_ARRAY_BUFFER, maxParticles * sizeof(glm::vec3), nullptr, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, maxParticles * sizeof(glm::vec4), nullptr, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	// Create vertex buffer for velocities
 	vboVel = createBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, *vboVel);
-	glBufferData(GL_ARRAY_BUFFER, maxParticles * sizeof(glm::vec3), nullptr, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, maxParticles * sizeof(glm::vec4), nullptr, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	// Create vertex array object to handle vertex properties during rendering
@@ -233,21 +233,25 @@ void MyApp::ResetSimulation() {
 		break;
 	}
 	case 2: {
-		glm::vec3 A(-0.6f, -0.5f, -0.2f);
-		glm::vec3 B(0.6f, -0.5f, -0.2f);
-		glm::vec3 C(0.0f, 0.6f, 0.4f);
-
 		std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
+		std::uniform_real_distribution<float> dist11(-1.0f, 1.0f);
+		const float halfBase = 0.7f;
+		const float height = 1.0f;
 
 		for (int i = 0; i < currentNumParticles; ++i) {
 			float u = dist01(rng);
-			float v = dist01(rng);
-			if (u + v > 1.0f) {
-				u = 1.0f - u;
-				v = 1.0f - v;
-			}
-			glm::vec3 P = A + u * (B - A) + v * (C - A);
-			positions[i] = glm::vec3(P);
+			float s = std::cbrt(u); // s = u^(1/3)
+
+			float z = height * (0.5f - s);
+
+			float currentHalf = halfBase * s;
+
+			float ux = dist11(rng);
+			float uy = dist11(rng);
+			float x = currentHalf * ux;
+			float y = currentHalf * uy;
+
+			positions[i] = glm::vec3(x, y, z);
 		}
 		break;
 	}
@@ -328,7 +332,7 @@ void MyApp::Render() {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
-
+	
 	shaderProgram.On();
 	shaderProgram.SetUniform("particle_size", particleSize);
 	shaderProgram.SetTexture("tex0", 0, *particleTexture);
@@ -396,7 +400,7 @@ void MyApp::RenderGUI()
 	ImGui::SameLine();
 	ImGui::RadioButton("Ring", &initDistribution, 1);
 	ImGui::SameLine();
-	ImGui::RadioButton("Triangle", &initDistribution, 2);
+	ImGui::RadioButton("Pyramid", &initDistribution, 2);
 	ImGui::SameLine();
 	ImGui::RadioButton("Gaussian blob", &initDistribution, 3);
 	ImGui::SameLine();
@@ -405,6 +409,15 @@ void MyApp::RenderGUI()
 		ImGui::SliderInt("Spiral arms", &spiralArms, 1, 2);
 	}
 
+	ImGui::Separator();
+	if (ImGui::Button("Reset camera")) {
+		m_camera.SetView(
+			glm::vec3(0.0, 0.0, 2.0),
+			glm::vec3(0.0, 0.0, 0.0),
+			glm::vec3(0.0, 1.0, 0.0));
+		m_cameraManipulator.SetCamera(&m_camera);
+
+	}
 	ImGui::Separator();
 	ImGui::Text("Simulation Controls");
 	ImGui::Checkbox("Pause Simulation", &simulation_paused);

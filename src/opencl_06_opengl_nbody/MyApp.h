@@ -133,7 +133,7 @@ private:
 	// Initial distribution type (0..4)
 	// 0 = Uniform random
 	// 1 = Ring
-	// 2 = Triangle
+	// 2 = Pyramid
 	// 3 = Gaussian blob
 	// 4 = Spiral galaxy
 	int initDistribution = 0;
