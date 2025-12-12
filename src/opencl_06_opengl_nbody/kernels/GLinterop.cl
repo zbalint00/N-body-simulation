@@ -51,6 +51,98 @@ __kernel void computeParticleCellIndex(
 }
 
 /**
+ * This kernel counts how many particles fall into each grid cell.
+ *
+ * For each particle:
+ *   - read its precomputed cell index from particleCellIndex,
+ *   - atomically increment the corresponding entry in cellCount.
+ *
+ * cellCount must be zero-initialized before launching this kernel.
+ *
+ * @param particleCellIndex (in/out) Global buffer of particle's cell index.
+ * @param cellCount         (out) Per-cell particle count.
+ * @param numParticles      (in)  Number of particles.
+ */
+__kernel void countParticlesPerCell(
+    __global const int* particleCellIndex,
+    __global int*       cellCount,
+    const int           numParticles)
+{
+    int particleId  = get_global_id(0);
+    if (particleId  >= numParticles) return;
+
+    int cellId = particleCellIndex[particleId];
+    
+    // Atomic add to handle thread race
+    atomic_inc(&cellCount[cellId]);
+}
+
+/**
+ * This kernel performs an exclusive prefix sum (scan) over the cellCount array
+ * to compute the starting index of each cell in the "sorted by cell" index array.
+ *
+ * After the kernel cellStart[c] will hold the starting index (offset) for cell c in the sorted index array
+ *
+ * A single work-item (gid == 0) performs the scan sequentially.
+ *
+ * @param cellCount   (in)  Per-cell particle counts.
+ * @param cellStart   (out) Per-cell start indices in the sorted index array.
+ * @param totalCells  (in)  Total number of cells in the grid.
+ */
+__kernel void generateCellStartPrefix(
+    __global int* cellCount,
+    __global int* cellStart,
+    const int     totalCells)
+{
+    int gid = get_global_id(0);
+    if (gid != 0) return;
+
+    int sum = 0;
+    // For each cell, calculate where the beginning of the block of particles belonging to the cell begins in the sortedIndex array.
+    for (int cellId = 0; cellId < totalCells; ++cellId) {
+        int count = cellCount[cellId];
+        cellStart[cellId] = sum;
+        sum += count;
+    }
+    
+    cellStart[totalCells] = sum;
+}
+
+/**
+ * This kernel builds a sorted by cell particle index array.
+ *
+ * It will group particles by their cell, so that all particles
+ * belonging to cell "c" will be one after another in the sortedIndex buffer:
+ *
+ * @param particleCellIndex (in/out) Global buffer of particle's cell index.
+ * @param cellCount         (in/out) Per-cell particle counts. (Note: It will be modified due to the decreasing)
+ * @param cellStart         (in)  For each cell, its starting offset into sortedIndex.
+ * @param sortedIndex       (out) Sorted by cell particle indexes.
+ * @param numParticles      (in)  Number of particles.
+ */
+__kernel void sortParticlesByCell(
+    __global const int* particleCellIndex,
+    __global int*       cellCount,
+    __global const int* cellStart,
+    __global int*       sortedIndex,
+    const int           numParticles)
+{
+    int particleId  = get_global_id(0);
+    if (particleId  >= numParticles) return;
+
+    int cellId  = particleCellIndex[particleId];
+
+    // Get unique index for particles inside cell. Atomic decrement to handle thread race
+    int indexWithinCell = atomic_dec(&cellCount[cellId]) - 1;
+    // Actual index in the sorted array
+    int destIndex  = cellStart[cellId] + indexWithinCell;
+
+    // Store the particle id into its position in the cell-grouped array.
+    sortedIndex[destIndex] = particleId;
+}
+
+
+/**
  * For each cell, this kernel computes:
  *   - the total mass inside the cell
  *   - the sum of (mass * position) inside the cell.
@@ -60,7 +152,6 @@ __kernel void computeParticleCellIndex(
  *   - The actual center of mass (COM) is computed later as:
  *         COM = cellCOM[cell] / cellMass[cell]
  *
- * Work distribution:
  *   - One work-group works on one cell.
  *   - Inside the group, each thread processes a subset of particles.
  *   - Threads write their partial sums to local memory.
@@ -68,11 +159,11 @@ __kernel void computeParticleCellIndex(
  *
  * @param pos             (in/out)        Global buffer of particle position (x,y,z).
  * @param masses             (in/out)     Global buffer of particle masses.
- * @param particleCellIndex  (in/out)     Global buffer of particle's cell index.
  * @param cellMass           (in/out)     For each cell, the total mass of particles in that cell.
  * @param cellCOM            (in/out)     For each cell, the mass center position.
- * @param numParticles       (in)         Number of particles.
  * @param totalCells         (in)         Total number of cells in the world.
+ * @param cellStart          (in/out)     Per-cell start indexes in the sorted index array.
+ * @param sortedIndex        (in/out)     Sorted by cell particle indexes.
  * @param localMass          (local)      Per-thread partial mass sums, then reduced to total mass.
  * @param localCOMX          (local)      Per-thread partial sums of (mass * pos.x), then reduced.
  * @param localCOMY          (local)      Per-thread partial sums of (mass * pos.y), then reduced.
@@ -81,11 +172,11 @@ __kernel void computeParticleCellIndex(
 __kernel void computeCellCOM(
     __global const float3* pos,
     __global const float* masses,
-    __global const int* particleCellIndex,
     __global float* cellMass,
     __global float3* cellCOM,
-    const int numParticles,
     const int totalCells,
+    __global const int* cellStart,
+    __global const int* sortedIndex, 
     __local float* localMass,        
     __local float* localCOMX,      
     __local float* localCOMY,      
@@ -100,24 +191,27 @@ __kernel void computeCellCOM(
     int localId   = get_local_id(0);
     int localSize = get_local_size(0);
 
+    // Range in sortedIndex belonging to this cell:
+    int startIndex = cellStart[cellId];
+    int endIndex   = cellStart[cellId + 1]; 
+
     // Per-thread partial sums.
     float threadMass  = 0.0f;
     float threadCOMX  = 0.0f;
     float threadCOMY  = 0.0f;
     float threadCOMZ  = 0.0f;
 
-    // Each thread visits particles in a strided way:
-    // particleId = localId, localId + localSize, localId + 2*localSize, ...
-    for (int particleId = localId; particleId < numParticles; particleId += localSize) {
-        // Only count particles that belong to this cell.
-        if (particleCellIndex[particleId] == cellId) {
-            float mass = masses[particleId];
-            float3 position = pos[particleId];
-            threadMass += mass;
-            threadCOMX += position.x * mass;
-            threadCOMY += position.y * mass;
-            threadCOMZ += position.z * mass;
-        }
+    // Each thread visits particles in a strided way
+    // It will only visit particles inside the current cell
+    for (int id = startIndex + localId; id < endIndex; id += localSize) {
+        int particleId = sortedIndex[id];
+        float mass = masses[particleId];
+        float3 position = pos[particleId];
+        
+        threadMass += mass;
+        threadCOMX += position.x * mass;
+        threadCOMY += position.y * mass;
+        threadCOMZ += position.z * mass;       
     }
 
     // Store partial sums in local (shared) memory.
@@ -129,7 +223,7 @@ __kernel void computeCellCOM(
     // Wait every thread to finish
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Local reduction: binary tree pattern.
+    // Local reduction:
     // On each step, the first half of threads add values from the second half.
     for (int offset = localSize >> 1; offset > 0; offset >>= 1) {
         if (localId < offset) {
@@ -161,13 +255,10 @@ __kernel void computeCellCOM(
  *
  * For each particle:
  *   - determine its grid cell from particleCellIndex,
- *   - loop over all other particles and:
- *       * compute exact particle-to-particle forces for particles
- *         in the same cell or in one of the 25 neighboring cells
- *         (the local 26 block),
+ *   - loop over particles in the same cell and in the 26 neighboring cells,
  *   - loop over all grid cells and:
  *       * skip empty cells (cellMass[cell] <= 0),
- *       * skip cells in the local 26 neighborhood (already handled exactly),
+ *       * skip cells in the local 26 neighborhood,
  *       * for all other (distant) cells, treat the whole cell as a single
  *         mass located at its center of mass, computed from cellMass and cellCOM,
  *         and add this approximate contribution to the acceleration,
@@ -179,6 +270,8 @@ __kernel void computeCellCOM(
  * @param particleCellIndex (in/out)     Global buffer of particle's cell index.
  * @param cellMass          (in/out)     For each cell, total mass in that cell.
  * @param cellCOM           (in/out)     For each cell, sum of (mass * position) in that cell.
+ * @param cellStart         (in/out)     Per-cell start indexes in the sorted index array.
+ * @param sortedIndex       (in/out)     Sorted by cell particle indexes.
  * @param gridNx            (in)         Number of cells in X direction.
  * @param gridNy            (in)         Number of cells in Y direction.
  * @param gridNz            (in)         Number of cells in Z direction.
@@ -194,6 +287,8 @@ __kernel void update(
     __global const int* particleCellIndex,
     __global const float* cellMass,       
     __global const float3* cellCOM,
+    __global const int* cellStart,
+    __global const int* sortedIndex,
     const int gridNx,
     const int gridNy,
     const int gridNz,
@@ -218,57 +313,58 @@ __kernel void update(
     // Actual particle's cell
     int myCellIndex = particleCellIndex[particleId];
     int myCellX     = myCellIndex % gridNx;
-    int myCellY     = myCellIndex / gridNx;
-    int myCellZ     = (myCellIndex / gridNx) / gridNy;
+    int myCellY     = (myCellIndex / gridNx) % gridNy;
+    int myCellZ     = myCellIndex / (gridNx * gridNy);
 
     // Start with zero acceleration.
     float3 totalAcceleration  = (float3)(0.0f, 0.0f, 0.0f);
 
-    for (int otherId = 0; otherId < numParticles; ++otherId)
-    {
-        if (otherId == particleId)
-            continue; // no self-interaction
+ for (int neighborOffsetZ = -1; neighborOffsetZ <= 1; ++neighborOffsetZ) {
+        int neighborCellZ = myCellZ + neighborOffsetZ;
+        if (neighborCellZ < 0 || neighborCellZ >= gridNz) continue;
 
-        int otherCellIndex = particleCellIndex[otherId];
-        int otherCellX     = otherCellIndex % gridNx;
-        int otherCellY     = otherCellIndex / gridNx;
-        int otherCellZ     = (otherCellIndex / gridNx) / gridNy;
+        for (int neighborOffsetY = -1; neighborOffsetY <= 1; ++neighborOffsetY) {
+            int neighborCellY = myCellY + neighborOffsetY;
+            if (neighborCellY < 0 || neighborCellY >= gridNy) continue;
 
-        int dxCell = otherCellX - myCellX;
-        int dyCell = otherCellY - myCellY;
-        int dzCell = otherCellZ - myCellZ;
-        if (dxCell < 0) dxCell = -dxCell;
-        if (dyCell < 0) dyCell = -dyCell;
-        if (dzCell < 0) dzCell = -dzCell;
+            for (int neighborOffsetX = -1; neighborOffsetX <= 1; ++neighborOffsetX) {
+                int neighborCellX = myCellX + neighborOffsetX;
+                if (neighborCellX < 0 || neighborCellX >= gridNx) continue;
 
-        // Only exact interaction if the other particle is in the same cell
-        // or in one of the 25 neighboring cells (26 block).
-        if (dxCell <= 1 && dyCell <= 1 && dzCell <= 1)
-        {
-            float3 otherPos   = pos[otherId];
+                // Neighbor cell 3D coordinates -> 1D index
+                int neighborCellIndex = neighborCellX + neighborCellY * gridNx + neighborCellZ * gridNx * gridNy;
+                
+                // Range in sortedIndex for this neighbor cell.
+                int cellRangeStart = cellStart[neighborCellIndex];
+                int cellRangeEnd   = cellStart[neighborCellIndex + 1];
 
-            // Vector from current particle to other particle.
-            float3 vectorToOther = otherPos - position;
+                // Loop over all particles in this neighbor cell.
+                for (int id = cellRangeStart; id < cellRangeEnd; ++id) {
+                    int otherParticleId = sortedIndex[id];
+                    if (otherParticleId == particleId) continue;
 
-            // Same distance computation as in the original update kernel.
-            float distanceSquared = vectorToOther.x * vectorToOther.x
-                                  + vectorToOther.y * vectorToOther.y
-                                  + vectorToOther.z * vectorToOther.z
-                                  + softening;
+                    float3 otherPosition = pos[otherParticleId];
+                    // Vector from this particle to the neighbor particle.
+                    float3 direction = otherPosition - position;
 
-            float invDist        = 1.0f / sqrt(distanceSquared);
-            float invDistCube    = invDist * invDist * invDist; // 1 / r^3
+                    // Distance squared + softening factor.
+                    float distanceSquared = direction.x * direction.x
+                                          + direction.y * direction.y 
+                                          + direction.z * direction.z
+                                          + softening;
 
-            // Same force magnitude formula as original:
-            // forceMagnitude = G * m_other * invDistCube
-            float otherMass      = masses[otherId];
-            float forceMagnitude = (G * otherMass) * invDistCube;
+                    float invDistance  = 1.0f / sqrt(distanceSquared);
+                    float invDistanceCubed = invDistance * invDistance * invDistance;
 
-            // Accumulate acceleration (a = F/m, own mass cancels out here).
-            totalAcceleration += vectorToOther * forceMagnitude;
+                    float otherMass      = masses[otherParticleId];
+                    float forceMagnitude = (G * otherMass) * invDistanceCubed;
+
+                    totalAcceleration += direction * forceMagnitude;
+                }
+            }
         }
     }
-
+    
 
     // Loop over all cells and add their contribution.
     for (int cellIndex = 0; cellIndex < totalCells; ++cellIndex) {
@@ -276,8 +372,8 @@ __kernel void update(
         if (cellMassValue <= 0.0f) continue; // skip empty cells
 
         int cellX = cellIndex % gridNx;
-        int cellY = cellIndex / gridNx;
-        int cellZ = (cellIndex / gridNx) / gridNy;
+        int cellY = (cellIndex / gridNx) % gridNy;
+        int cellZ = cellIndex / (gridNx * gridNy);
 
         int dxCell = cellX - myCellX;
         int dyCell = cellY - myCellY;
@@ -286,14 +382,16 @@ __kernel void update(
         if (dyCell < 0) dyCell = -dyCell;
         if (dzCell < 0) dzCell = -dzCell;
 
-        // Skip cells in our 3x3 neighborhood (own + 8 neighbors),
-        // because their particles were already handled exactly above.
+        // Skip cells in our neighborhood,
         if (dxCell <= 1 && dyCell <= 1 && dzCell <= 1)
             continue;
 
         // Compute center of mass of this cell:
         float3 cellCOMHelper = cellCOM[cellIndex];
-        float3 cellCOMPosition  = (float3)(cellCOMHelper.x / cellMassValue, cellCOMHelper.y / cellMassValue, cellCOMHelper.z / cellMassValue);
+        float3 cellCOMPosition  = (float3)(
+                                cellCOMHelper.x / cellMassValue, 
+                                cellCOMHelper.y / cellMassValue, 
+                                cellCOMHelper.z / cellMassValue);
 
         // Direction vector from particle to cell COM.
         float3 direction = cellCOMPosition - position;
@@ -306,10 +404,10 @@ __kernel void update(
 
         float invDistance      = 1.0f / sqrt(distanceSquared);
         float invDistanceCubed = invDistance * invDistance * invDistance;
-
+        float forceMagnitude = (G * cellMassValue) * invDistanceCubed;
         // Gravitational acceleration contribution from this cell.
         // Proportional to G * cellMass / r^2, with direction.
-        totalAcceleration  += direction * (G * cellMassValue * invDistanceCubed);
+        totalAcceleration  += direction * forceMagnitude;
     }
 
     // Integrate motion: update velocity, then position.
@@ -317,6 +415,6 @@ __kernel void update(
     float3 newPosition = position + newVelocity * deltaTime;
 
     // Store updated state back to global buffer.
-    pos[particleId] = (float3)(newPosition.x, newPosition.y, newPosition.z);
-    vel[particleId] = (float3)(newVelocity.x, newVelocity.y, newVelocity.z);
+    pos[particleId] = newPosition;
+    vel[particleId] = newVelocity;
 }

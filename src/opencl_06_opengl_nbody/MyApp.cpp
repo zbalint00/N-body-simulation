@@ -144,6 +144,9 @@ void MyApp::InitCL() {
 	}
 	// Init kernels
 	kernelCellIndex = cl::Kernel(program, "computeParticleCellIndex");
+	kernelCountPerCell = cl::Kernel(program, "countParticlesPerCell");
+	kernelCellStartPrefix = cl::Kernel(program, "generateCellStartPrefix");
+	kernelSortParticles = cl::Kernel(program, "sortParticlesByCell");
 	kernelComputeCOM = cl::Kernel(program, "computeCellCOM");
 	kernelUpdate = cl::Kernel(program, "update");
 
@@ -154,8 +157,11 @@ void MyApp::InitCL() {
 
 	// Init Grid + COM buffers
 	clParticleCellIndex = cl::Buffer(context, CL_MEM_READ_WRITE, maxParticles * sizeof(int));
-	clCellCOM = cl::Buffer(context, CL_MEM_READ_WRITE, gridNx * gridNy * sizeof(glm::vec3));
-	clCellMass = cl::Buffer(context, CL_MEM_READ_WRITE, gridNx * gridNy * sizeof(float));
+	clCellCount = cl::Buffer(context, CL_MEM_READ_WRITE, totalCells * sizeof(int));
+	clCellStart = cl::Buffer(context, CL_MEM_READ_WRITE, (totalCells + 1) * sizeof(int));
+	clSortedParticleIndex = cl::Buffer(context, CL_MEM_READ_WRITE, maxParticles * sizeof(int));
+	clCellCOM = cl::Buffer(context, CL_MEM_READ_WRITE, totalCells * sizeof(glm::vec3));
+	clCellMass = cl::Buffer(context, CL_MEM_READ_WRITE, totalCells * sizeof(float));
 
 	// Set kernel arguments
 
@@ -172,13 +178,27 @@ void MyApp::InitCL() {
 	kernelCellIndex.setArg(10, worldMinZ);
 	kernelCellIndex.setArg(11, currentNumParticles);
 
+	kernelCountPerCell.setArg(0, clParticleCellIndex);
+	kernelCountPerCell.setArg(1, clCellCount);
+	kernelCountPerCell.setArg(2, currentNumParticles);
+
+	kernelCellStartPrefix.setArg(0, clCellCount);
+	kernelCellStartPrefix.setArg(1, clCellStart);
+	kernelCellStartPrefix.setArg(2, totalCells);
+
+	kernelSortParticles.setArg(0, clParticleCellIndex);
+	kernelSortParticles.setArg(1, clCellCount);
+	kernelSortParticles.setArg(2, clCellStart);
+	kernelSortParticles.setArg(3, clSortedParticleIndex);
+	kernelSortParticles.setArg(4, currentNumParticles);
+
 	kernelComputeCOM.setArg(0, clVboBuffer);
 	kernelComputeCOM.setArg(1, clMasses);
-	kernelComputeCOM.setArg(2, clParticleCellIndex);
-	kernelComputeCOM.setArg(3, clCellMass);
-	kernelComputeCOM.setArg(4, clCellCOM);
-	kernelComputeCOM.setArg(5, currentNumParticles);
-	kernelComputeCOM.setArg(6, totalCells);
+	kernelComputeCOM.setArg(2, clCellMass);
+	kernelComputeCOM.setArg(3, clCellCOM);
+	kernelComputeCOM.setArg(4, totalCells);
+	kernelComputeCOM.setArg(5, clCellStart);
+	kernelComputeCOM.setArg(6, clSortedParticleIndex);
 	kernelComputeCOM.setArg(7, cl::Local(localSize * sizeof(float)));
 	kernelComputeCOM.setArg(8, cl::Local(localSize * sizeof(float)));
 	kernelComputeCOM.setArg(9, cl::Local(localSize * sizeof(float)));
@@ -190,17 +210,21 @@ void MyApp::InitCL() {
 	kernelUpdate.setArg(3, clParticleCellIndex);
 	kernelUpdate.setArg(4, clCellMass);
 	kernelUpdate.setArg(5, clCellCOM);
-	kernelUpdate.setArg(6, gridNx);
-	kernelUpdate.setArg(7, gridNy);
-	kernelUpdate.setArg(8, gridNz);
-	kernelUpdate.setArg(9, totalCells);
-	kernelUpdate.setArg(10, currentNumParticles);
+	kernelUpdate.setArg(6, clCellStart);
+	kernelUpdate.setArg(7, clSortedParticleIndex);
+	kernelUpdate.setArg(8, gridNx);
+	kernelUpdate.setArg(9, gridNy);
+	kernelUpdate.setArg(10, gridNz);
+	kernelUpdate.setArg(11, totalCells);
+	kernelUpdate.setArg(12, currentNumParticles);
+
 
 	ResetSimulation();
 }
 
 void MyApp::ResetSimulation() {
 	currentNumParticles = numParticles;
+	globalParticles = ((size_t)currentNumParticles + localSize - 1) / localSize * localSize;
 	// Initialize particle data
 	std::vector<float> masses(currentNumParticles, 1.f);
 	queue.enqueueWriteBuffer(clMasses, CL_TRUE, 0, masses.size() * sizeof(float), masses.data());
@@ -211,7 +235,7 @@ void MyApp::ResetSimulation() {
 			double angle = i / double(velocities.size() / 2) * (2 * M_PI);
 			velocities[i].x = static_cast<float>(-std::cos(angle) * 1.7);
 			velocities[i].y = static_cast<float>(std::sin(angle) * 1.7);
-			velocities[i].z = static_cast<float>(std::sin(angle) * 0.3);
+			velocities[i].z = static_cast<float>(std::sin(angle) * 0.2 * 1.7);
 		}
 
 	// Initialize positions
@@ -228,7 +252,7 @@ void MyApp::ResetSimulation() {
 		for (int i = 0; i < currentNumParticles; ++i) {
 			float angle = (static_cast<float>(i) / currentNumParticles) * 2.0f * M_PI;
 			float r = 0.25f;
-			positions[i] = glm::vec3(r * std::sin(angle), r * std::cos(angle), r * std::sin(3.0f * angle));
+			positions[i] = glm::vec3(r * std::sin(angle), r * std::cos(angle), r * std::sin(2.0f * angle));
 		}
 		break;
 	}
@@ -301,8 +325,7 @@ void MyApp::ResetSimulation() {
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	kernelCellIndex.setArg(11, currentNumParticles);
-	kernelComputeCOM.setArg(5, currentNumParticles);
-	kernelUpdate.setArg(10, currentNumParticles);
+	kernelUpdate.setArg(12, currentNumParticles);
 }
 
 void MyApp::Update(const UpdateInfo& info) {
@@ -310,16 +333,25 @@ void MyApp::Update(const UpdateInfo& info) {
 
 	if (!simulation_paused) {
 		float deltaTime = std::clamp(info.deltaTimeSec, 0.0000001f, 0.001f);
-		kernelUpdate.setArg(11, gravityConstant);
-		kernelUpdate.setArg(12, deltaTime);
+		kernelUpdate.setArg(13, gravityConstant);
+		kernelUpdate.setArg(14, deltaTime);
 
 		std::vector<cl::Memory> glObjects{ clVboBuffer, clVelocities };
 		queue.enqueueAcquireGLObjects(&glObjects);
-		queue.enqueueNDRangeKernel(kernelCellIndex, cl::NullRange, cl::NDRange(globalParticles), cl::NDRange(localSize));
+		queue.enqueueNDRangeKernel(kernelCellIndex, cl::NullRange, cl::NDRange(globalParticles));
+
+		// Fill with zeros for accuracy
+		//queue.enqueueFillBuffer(clCellCount, 0, 0, totalCells * sizeof(cl_int));
+
+		queue.enqueueNDRangeKernel(kernelCountPerCell, cl::NullRange, cl::NDRange(globalParticles));
+
+		queue.enqueueNDRangeKernel(kernelCellStartPrefix, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
+
+		queue.enqueueNDRangeKernel(kernelSortParticles, cl::NullRange, cl::NDRange(globalParticles));
 
 		queue.enqueueNDRangeKernel(kernelComputeCOM, cl::NullRange, cl::NDRange(globalCOM), cl::NDRange(localSize));
 
-		queue.enqueueNDRangeKernel(kernelUpdate, cl::NullRange, cl::NDRange(globalParticles), cl::NDRange(localSize));
+		queue.enqueueNDRangeKernel(kernelUpdate, cl::NullRange, cl::NDRange(globalParticles));
 		queue.enqueueReleaseGLObjects(&glObjects);
 		queue.finish();
 	}

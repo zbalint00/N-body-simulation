@@ -75,12 +75,12 @@ private:
 	int totalCells = gridNx * gridNy * gridNz;
 
 	// World size
-	float worldMinX = -1.0f;
-	float worldMaxX = 1.0f;
-	float worldMinY = -1.0f;
-	float worldMaxY = 1.0f;
-	float worldMinZ = -1.0f;
-	float worldMaxZ = 1.0f;
+	float worldMinX = -2.0f;
+	float worldMaxX = 2.0f;
+	float worldMinY = -2.0f;
+	float worldMaxY = 2.0f;
+	float worldMinZ = -2.0f;
+	float worldMaxZ = 2.0f;
 
 	// Grid sizes
 	float cellSizeX = (worldMaxX - worldMinX) / gridNx;
@@ -107,6 +107,9 @@ private:
 	// New kernels for grid and COM
 	cl::Kernel        kernelCellIndex;
 	cl::Kernel		  kernelComputeCOM;
+	cl::Kernel		  kernelCountPerCell;
+	cl::Kernel		  kernelCellStartPrefix;
+	cl::Kernel		  kernelSortParticles;
 
 	cl::BufferGL      clVboBuffer;
 	cl::BufferGL      clVelocities;
@@ -114,6 +117,9 @@ private:
 
 	// Grid buffer
 	cl::Buffer clParticleCellIndex;
+	cl::Buffer clCellCount;
+	cl::Buffer clCellStart;
+	cl::Buffer clSortedParticleIndex;
 
 	// COM buffers
 	cl::Buffer clCellMass;
@@ -143,7 +149,7 @@ private:
 
 	// GPU Optimization helpers
 	const size_t localSize = 128;
-	const size_t globalParticles = ((size_t)maxParticles + localSize - 1) / localSize * localSize;
+	size_t globalParticles = ((size_t)maxParticles + localSize - 1) / localSize * localSize;
 	const size_t globalCOM = ((size_t)totalCells) * localSize;
 
 	// Application state
